@@ -1,5 +1,5 @@
 // Сервіс для автоматичного оновлення статусів заявок
-import { readNeeds, writeNeeds } from "./storage.js";
+import { readNeeds, updateNeedStatus } from "./storage.js";
 import { NEED_STATUS, AUTO_STATUS_UPDATE_HOURS } from "../config/constants.js";
 import { logInfo, logError } from "../utils/logger.js";
 
@@ -7,13 +7,13 @@ import { logInfo, logError } from "../utils/logger.js";
  * Оновлює статуси заявок: якщо заявка зі статусом "нове" існує більше 24 годин,
  * автоматично змінює статус на "в очікуванні"
  */
-export function updateNeedStatuses() {
+export async function updateNeedStatuses() {
   try {
-    const needs = readNeeds();
+    const needs = await readNeeds();
     const now = new Date();
     let changedCount = 0;
 
-    needs.forEach((need) => {
+    for (const need of needs) {
       const created = new Date(need.date);
       const hoursPassed = (now - created) / (1000 * 60 * 60);
 
@@ -22,13 +22,12 @@ export function updateNeedStatuses() {
         need.status === NEED_STATUS.NEW &&
         hoursPassed >= AUTO_STATUS_UPDATE_HOURS
       ) {
-        need.status = NEED_STATUS.WAITING;
+        await updateNeedStatus(need.id, NEED_STATUS.WAITING);
         changedCount++;
       }
-    });
+    }
 
     if (changedCount > 0) {
-      writeNeeds(needs);
       logInfo("Статуси заявок автоматично оновлено", { updatedCount: changedCount });
     }
   } catch (err) {

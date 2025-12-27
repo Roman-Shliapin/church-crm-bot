@@ -1,32 +1,50 @@
-// Сервіс для роботи з JSON файлами (база даних)
-import fs from "fs";
-import { MEMBERS_FILE, NEEDS_FILE, PRAYERS_FILE, LESSONS_FILE } from "../config/constants.js";
-import { logError, logWarning, logSuccess } from "../utils/logger.js";
+// Сервіс для роботи з MongoDB (замість JSON файлів)
+import { getCollection } from "./database.js";
+import { logError, logSuccess } from "../utils/logger.js";
+
+// Назви колекцій в MongoDB
+const COLLECTIONS = {
+  MEMBERS: "members",
+  NEEDS: "needs",
+  PRAYERS: "prayers",
+  LESSONS: "lessons",
+};
+
+// ==================== ЧЛЕНИ ЦЕРКВИ ====================
 
 /**
- * Читає дані з файлу members.json
- * @returns {Array} Масив членів церкви
+ * Читає всіх членів церкви з MongoDB
+ * @returns {Promise<Array>} Масив членів церкви
  */
-export function readMembers() {
+export async function readMembers() {
   try {
-    const data = fs.readFileSync(MEMBERS_FILE, "utf-8");
-    return JSON.parse(data || "[]");
+    const collection = await getCollection(COLLECTIONS.MEMBERS);
+    const members = await collection.find({}).toArray();
+    // Прибираємо MongoDB _id поле для сумісності
+    return members.map(({ _id, ...member }) => member);
   } catch (err) {
-    logError("Помилка читання members.json", err);
+    logError("Помилка читання members з MongoDB", err);
     return [];
   }
 }
 
 /**
- * Зберігає дані у файл members.json
+ * Зберігає масив членів церкви в MongoDB
  * @param {Array} members - Масив членів церкви
  */
-export function writeMembers(members) {
+export async function writeMembers(members) {
   try {
-    fs.writeFileSync(MEMBERS_FILE, JSON.stringify(members, null, 2));
-    logSuccess("Members data saved", { count: members.length });
+    const collection = await getCollection(COLLECTIONS.MEMBERS);
+    
+    // Очищаємо колекцію та вставляємо нові дані
+    await collection.deleteMany({});
+    if (members.length > 0) {
+      await collection.insertMany(members);
+    }
+    
+    logSuccess("Members data saved to MongoDB", { count: members.length });
   } catch (err) {
-    logError("Помилка запису members.json", err);
+    logError("Помилка запису members в MongoDB", err);
     throw err;
   }
 }
@@ -34,50 +52,76 @@ export function writeMembers(members) {
 /**
  * Знаходить члена церкви за Telegram ID
  * @param {number} userId - Telegram ID користувача
- * @returns {Object|null} Об'єкт члена церкви або null
+ * @returns {Promise<Object|null>} Об'єкт члена церкви або null
  */
-export function findMemberById(userId) {
-  const members = readMembers();
-  return members.find((member) => member.id === userId) || null;
+export async function findMemberById(userId) {
+  try {
+    const collection = await getCollection(COLLECTIONS.MEMBERS);
+    const member = await collection.findOne({ id: userId });
+    if (!member) return null;
+    
+    // Прибираємо MongoDB _id поле
+    const { _id, ...memberData } = member;
+    return memberData;
+  } catch (err) {
+    logError("Помилка пошуку member в MongoDB", err);
+    return null;
+  }
 }
 
 /**
  * Додає нового члена церкви
  * @param {Object} user - Об'єкт з даними користувача
  */
-export function addMember(user) {
-  const members = readMembers();
-  // Перевіряємо, чи користувач не зареєстрований
-  if (members.find((m) => m.id === user.id)) {
-    throw new Error("Користувач вже зареєстрований");
+export async function addMember(user) {
+  try {
+    const collection = await getCollection(COLLECTIONS.MEMBERS);
+    
+    // Перевіряємо, чи користувач не зареєстрований
+    const existing = await collection.findOne({ id: user.id });
+    if (existing) {
+      throw new Error("Користувач вже зареєстрований");
+    }
+    
+    await collection.insertOne(user);
+    logSuccess("Member added to MongoDB", { userId: user.id });
+  } catch (err) {
+    logError("Помилка додавання member в MongoDB", err);
+    throw err;
   }
-  members.push(user);
-  writeMembers(members);
 }
 
+// ==================== ЗАЯВКИ НА ДОПОМОГУ ====================
+
 /**
- * Читає дані з файлу needs.json
- * @returns {Array} Масив заявок на допомогу
+ * Читає всі заявки на допомогу з MongoDB
+ * @returns {Promise<Array>} Масив заявок на допомогу
  */
-export function readNeeds() {
+export async function readNeeds() {
   try {
-    const data = fs.readFileSync(NEEDS_FILE, "utf-8");
-    return JSON.parse(data || "[]");
+    const collection = await getCollection(COLLECTIONS.NEEDS);
+    const needs = await collection.find({}).toArray();
+    // Прибираємо MongoDB _id поле
+    return needs.map(({ _id, ...need }) => need);
   } catch (err) {
-    logError("Помилка читання needs.json", err);
+    logError("Помилка читання needs з MongoDB", err);
     return [];
   }
 }
 
 /**
- * Зберігає дані у файл needs.json
+ * Зберігає масив заявок на допомогу в MongoDB
  * @param {Array} needs - Масив заявок на допомогу
  */
-export function writeNeeds(needs) {
+export async function writeNeeds(needs) {
   try {
-    fs.writeFileSync(NEEDS_FILE, JSON.stringify(needs, null, 2));
+    const collection = await getCollection(COLLECTIONS.NEEDS);
+    await collection.deleteMany({});
+    if (needs.length > 0) {
+      await collection.insertMany(needs);
+    }
   } catch (err) {
-    logError("Помилка запису needs.json", err);
+    logError("Помилка запису needs в MongoDB", err);
     throw err;
   }
 }
@@ -86,67 +130,93 @@ export function writeNeeds(needs) {
  * Додає нову заявку на допомогу
  * @param {Object} need - Об'єкт заявки
  */
-export function addNeed(need) {
-  const needs = readNeeds();
-  needs.push(need);
-  writeNeeds(needs);
+export async function addNeed(need) {
+  try {
+    const collection = await getCollection(COLLECTIONS.NEEDS);
+    await collection.insertOne(need);
+    logSuccess("Need added to MongoDB", { needId: need.id });
+  } catch (err) {
+    logError("Помилка додавання need в MongoDB", err);
+    throw err;
+  }
 }
 
 /**
  * Знаходить заявку за ID
  * @param {number|string} needId - ID заявки
- * @returns {Object|null} Об'єкт заявки або null
+ * @returns {Promise<Object|null>} Об'єкт заявки або null
  */
-export function findNeedById(needId) {
-  const needs = readNeeds();
-  return needs.find((n) => n.id.toString() === needId.toString()) || null;
+export async function findNeedById(needId) {
+  try {
+    const collection = await getCollection(COLLECTIONS.NEEDS);
+    const need = await collection.findOne({ id: parseInt(needId) });
+    if (!need) return null;
+    
+    const { _id, ...needData } = need;
+    return needData;
+  } catch (err) {
+    logError("Помилка пошуку need в MongoDB", err);
+    return null;
+  }
 }
 
 /**
  * Оновлює статус заявки
  * @param {number|string} needId - ID заявки
  * @param {string} newStatus - Новий статус
- * @returns {Object|null} Оновлений об'єкт заявки або null
+ * @returns {Promise<Object|null>} Оновлений об'єкт заявки або null
  */
-export function updateNeedStatus(needId, newStatus) {
-  const needs = readNeeds();
-  const need = needs.find((n) => n.id.toString() === needId.toString());
-  if (!need) {
+export async function updateNeedStatus(needId, newStatus) {
+  try {
+    const collection = await getCollection(COLLECTIONS.NEEDS);
+    const result = await collection.findOneAndUpdate(
+      { id: parseInt(needId) },
+      { $set: { status: newStatus } },
+      { returnDocument: "after" }
+    );
+    
+    if (!result.value) {
+      return null;
+    }
+    
+    const { _id, ...needData } = result.value;
+    return needData;
+  } catch (err) {
+    logError("Помилка оновлення need в MongoDB", err);
     return null;
   }
-  
-  // Оновлюємо статус
-  need.status = newStatus;
-  writeNeeds(needs);
-  
-  return need;
 }
 
 // ==================== МОЛИТВЕННІ ПОТРЕБИ ====================
 
 /**
- * Читає дані з файлу prayers.json
- * @returns {Array} Масив молитвенних потреб
+ * Читає всі молитвенні потреби з MongoDB
+ * @returns {Promise<Array>} Масив молитвенних потреб
  */
-export function readPrayers() {
+export async function readPrayers() {
   try {
-    const data = fs.readFileSync(PRAYERS_FILE, "utf-8");
-    return JSON.parse(data || "[]");
+    const collection = await getCollection(COLLECTIONS.PRAYERS);
+    const prayers = await collection.find({}).toArray();
+    return prayers.map(({ _id, ...prayer }) => prayer);
   } catch (err) {
-    logError("Помилка читання prayers.json", err);
+    logError("Помилка читання prayers з MongoDB", err);
     return [];
   }
 }
 
 /**
- * Зберігає дані у файл prayers.json
+ * Зберігає масив молитвенних потреб в MongoDB
  * @param {Array} prayers - Масив молитвенних потреб
  */
-export function writePrayers(prayers) {
+export async function writePrayers(prayers) {
   try {
-    fs.writeFileSync(PRAYERS_FILE, JSON.stringify(prayers, null, 2));
+    const collection = await getCollection(COLLECTIONS.PRAYERS);
+    await collection.deleteMany({});
+    if (prayers.length > 0) {
+      await collection.insertMany(prayers);
+    }
   } catch (err) {
-    logError("Помилка запису prayers.json", err);
+    logError("Помилка запису prayers в MongoDB", err);
     throw err;
   }
 }
@@ -155,39 +225,50 @@ export function writePrayers(prayers) {
  * Додає нову молитвенну потребу
  * @param {Object} prayer - Об'єкт молитвенної потреби
  */
-export function addPrayer(prayer) {
-  const prayers = readPrayers();
-  prayers.push(prayer);
-  writePrayers(prayers);
+export async function addPrayer(prayer) {
+  try {
+    const collection = await getCollection(COLLECTIONS.PRAYERS);
+    await collection.insertOne(prayer);
+    logSuccess("Prayer added to MongoDB", { prayerId: prayer.id });
+  } catch (err) {
+    logError("Помилка додавання prayer в MongoDB", err);
+    throw err;
+  }
 }
 
 // ==================== БІБЛІЙНІ УРОКИ ====================
 
 /**
- * Читає дані з файлу lessons.json
- * @returns {Array} Масив біблійних уроків
+ * Читає всі біблійні уроки з MongoDB
+ * @returns {Promise<Array>} Масив біблійних уроків
  */
-export function readLessons() {
+export async function readLessons() {
   try {
-    const data = fs.readFileSync(LESSONS_FILE, "utf-8");
-    return JSON.parse(data || "[]");
+    const collection = await getCollection(COLLECTIONS.LESSONS);
+    const lessons = await collection.find({}).toArray();
+    // Сортуємо за ID для коректного відображення
+    lessons.sort((a, b) => a.id - b.id);
+    return lessons.map(({ _id, ...lesson }) => lesson);
   } catch (err) {
-    logError("Помилка читання lessons.json", err);
-    // Повертаємо порожній масив, якщо файл не існує або помилка
+    logError("Помилка читання lessons з MongoDB", err);
     return [];
   }
 }
 
 /**
- * Зберігає дані у файл lessons.json
+ * Зберігає масив біблійних уроків в MongoDB
  * @param {Array} lessons - Масив біблійних уроків
  */
-export function writeLessons(lessons) {
+export async function writeLessons(lessons) {
   try {
-    fs.writeFileSync(LESSONS_FILE, JSON.stringify(lessons, null, 2));
-    logSuccess("Lessons data saved", { count: lessons.length });
+    const collection = await getCollection(COLLECTIONS.LESSONS);
+    await collection.deleteMany({});
+    if (lessons.length > 0) {
+      await collection.insertMany(lessons);
+    }
+    logSuccess("Lessons data saved to MongoDB", { count: lessons.length });
   } catch (err) {
-    logError("Помилка запису lessons.json", err);
+    logError("Помилка запису lessons в MongoDB", err);
     throw err;
   }
 }
@@ -195,10 +276,18 @@ export function writeLessons(lessons) {
 /**
  * Знаходить урок за ID
  * @param {number} lessonId - ID уроку
- * @returns {Object|null} Об'єкт уроку або null
+ * @returns {Promise<Object|null>} Об'єкт уроку або null
  */
-export function findLessonById(lessonId) {
-  const lessons = readLessons();
-  return lessons.find((lesson) => lesson.id === lessonId) || null;
+export async function findLessonById(lessonId) {
+  try {
+    const collection = await getCollection(COLLECTIONS.LESSONS);
+    const lesson = await collection.findOne({ id: lessonId });
+    if (!lesson) return null;
+    
+    const { _id, ...lessonData } = lesson;
+    return lessonData;
+  } catch (err) {
+    logError("Помилка пошуку lesson в MongoDB", err);
+    return null;
+  }
 }
-

@@ -8,9 +8,9 @@ import { generatePrayersExcel, deleteFile } from "../services/excel.js";
 /**
  * Обробник команди /pray - додати молитвенну потребу
  */
-export function handlePrayStart(ctx) {
+export async function handlePrayStart(ctx) {
   const userId = ctx.from.id;
-  const member = findMemberById(userId);
+  const member = await findMemberById(userId);
 
   if (member) {
     // Член церкви - можна додати ім'я або залишити анонімно
@@ -29,8 +29,8 @@ export function handlePrayStart(ctx) {
 /**
  * Обробник команди /prayers - показує вибір формату (тільки для адмінів)
  */
-export function handlePrayersList(ctx) {
-  const prayers = readPrayers();
+export async function handlePrayersList(ctx) {
+  const prayers = await readPrayers();
 
   if (prayers.length === 0) {
     return ctx.reply("📭 Наразі немає молитвенних потреб.");
@@ -54,7 +54,7 @@ export function handlePrayersList(ctx) {
  */
 export async function handlePrayersShowChat(ctx) {
   await ctx.answerCbQuery("Показую молитви в чаті...");
-  const prayers = readPrayers();
+  const prayers = await readPrayers();
 
   for (const prayer of prayers) {
     const message = formatPrayerMessage(prayer);
@@ -67,7 +67,7 @@ export async function handlePrayersShowChat(ctx) {
  */
 export async function handlePrayersShowExcel(ctx) {
   await ctx.answerCbQuery("Генерую Excel файл...");
-  const prayers = readPrayers();
+  const prayers = await readPrayers();
 
   try {
     const filePath = await generatePrayersExcel(prayers);
@@ -114,7 +114,7 @@ export async function handlePraySteps(ctx, msg) {
         name: ctx.session.data.name,
         description: sanitizedDescription,
       });
-      addPrayer(prayer);
+      await addPrayer(prayer);
       await ctx.reply("✅ Дякуємо! Ваша молитвенна потреба збережена 🙏");
       ctx.session = null;
       return true;

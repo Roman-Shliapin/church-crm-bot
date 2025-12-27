@@ -8,7 +8,7 @@ import { generateMembersExcel, deleteFile } from "../services/excel.js";
 export async function handleMembers(ctx) {
   ctx.reply("✅ Команда отримана, перевіряю доступ...");
 
-  const members = readMembers();
+  const members = await readMembers();
 
   if (members.length === 0) {
     return ctx.reply("📭 Поки що ніхто не зареєстрований.");
@@ -37,8 +37,8 @@ export async function handleMembers(ctx) {
  */
 import { findMemberById } from "../services/storage.js";
 
-export function handleMe(ctx) {
-  const member = findMemberById(ctx.from.id);
+export async function handleMe(ctx) {
+  const member = await findMemberById(ctx.from.id);
 
   if (!member) {
     ctx.reply("Вибачте, ви ще не зареєстровані ❌");

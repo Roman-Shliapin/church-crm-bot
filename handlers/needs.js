@@ -10,9 +10,9 @@ import { generateNeedsExcel, deleteFile } from "../services/excel.js";
 /**
  * Обробник команди /need - тільки для створення заявки
  */
-export function handleNeedStart(ctx) {
+export async function handleNeedStart(ctx) {
   const userId = ctx.from.id;
-  const member = findMemberById(userId);
+  const member = await findMemberById(userId);
 
   if (member) {
     // Член церкви - тільки опис
@@ -28,8 +28,8 @@ export function handleNeedStart(ctx) {
 /**
  * Обробник команди /needs - показує вибір формату (тільки для адмінів)
  */
-export function handleNeedsList(ctx) {
-  const needs = readNeeds();
+export async function handleNeedsList(ctx) {
+  const needs = await readNeeds();
 
   if (needs.length === 0) {
     return ctx.reply("📭 Наразі немає заявок на допомогу.");
@@ -53,7 +53,7 @@ export function handleNeedsList(ctx) {
  */
 export async function handleNeedsShowChat(ctx) {
   await ctx.answerCbQuery("Показую заявки в чаті...");
-  const needs = readNeeds();
+  const needs = await readNeeds();
 
   for (const need of needs) {
     const message = formatNeedMessage(need);
@@ -74,7 +74,7 @@ export async function handleNeedsShowChat(ctx) {
  */
 export async function handleNeedsShowExcel(ctx) {
   await ctx.answerCbQuery("Генерую Excel файл...");
-  const needs = readNeeds();
+  const needs = await readNeeds();
 
   try {
     const filePath = await generateNeedsExcel(needs);
@@ -135,7 +135,7 @@ export async function handleNeedSteps(ctx, msg) {
       description: sanitizedDescription,
     });
 
-    addNeed(need);
+    await addNeed(need);
     await ctx.reply("✅ Дякуємо! Ваша заявка збережена. Ми з вами зв'яжемось 🙏");
 
     // Повідомлення адмінам
@@ -160,7 +160,7 @@ export async function handleNeedSteps(ctx, msg) {
       description: sanitizedDescription,
     });
 
-    addNeed(need);
+    await addNeed(need);
     await ctx.reply("✅ Ваша заявка на допомогу збережена 🙏");
 
     // Повідомлення адмінам
@@ -199,7 +199,7 @@ export async function handleNeedStatusChange(ctx) {
   const newStatus = STATUS_MAP[newStatusKey];
 
   // Спочатку перевіряємо поточний статус
-  const currentNeed = findNeedById(needId);
+  const currentNeed = await findNeedById(needId);
 
   if (!currentNeed) {
     return ctx.answerCbQuery("⚠️ Не знайдено заявку з цим ID.");
@@ -211,7 +211,7 @@ export async function handleNeedStatusChange(ctx) {
   }
 
   // Оновлюємо статус
-  const updatedNeed = updateNeedStatus(needId, newStatus);
+  const updatedNeed = await updateNeedStatus(needId, newStatus);
   if (!updatedNeed) {
     return ctx.answerCbQuery("⚠️ Помилка оновлення статусу.");
   }

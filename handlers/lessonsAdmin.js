@@ -15,7 +15,7 @@ export function handleUploadLessonStart(ctx) {
 /**
  * Обробка назви уроку для завантаження PDF
  */
-export function handleUploadLessonName(ctx, msg) {
+export async function handleUploadLessonName(ctx, msg) {
   const step = ctx.session?.step;
   if (step !== "upload_lesson_name") {
     return false;
@@ -29,7 +29,7 @@ export function handleUploadLessonName(ctx, msg) {
   }
 
   // Перевіряємо, чи такий урок вже існує
-  const lessons = readLessons();
+  const lessons = await readLessons();
   const existingLesson = lessons.find(
     (l) => l.title.toLowerCase() === lessonName.toLowerCase()
   );
@@ -92,7 +92,7 @@ export async function handleUploadLessonFile(ctx) {
   }
 
   try {
-    const lessons = readLessons();
+    const lessons = await readLessons();
     
     if (ctx.session.data.isUpdate) {
       // Оновлюємо існуючий урок
@@ -110,7 +110,7 @@ export async function handleUploadLessonFile(ctx) {
       lesson.pdfFileName = document.file_name;
       lesson.pdfUploadDate = new Date().toLocaleString("uk-UA");
 
-      writeLessons(lessons);
+      await writeLessons(lessons);
 
       await ctx.reply(
         `✅ PDF файл успішно оновлено!\n\n` +
@@ -130,7 +130,7 @@ export async function handleUploadLessonFile(ctx) {
       };
 
       lessons.push(newLesson);
-      writeLessons(lessons);
+      await writeLessons(lessons);
 
       await ctx.reply(
         `✅ Новий урок успішно створено!\n\n` +

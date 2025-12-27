@@ -30,7 +30,7 @@ export async function handleAnnounceText(ctx, msg) {
     return true;
   }
 
-  const members = readMembers();
+  const members = await readMembers();
 
   if (members.length === 0) {
     await ctx.reply("⚠️ Немає зареєстрованих членів церкви для розсилки.");

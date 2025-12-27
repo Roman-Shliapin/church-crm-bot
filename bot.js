@@ -23,6 +23,7 @@ import { checkAdmin } from "./middlewares/admin.js";
 // Імпорт сервісів
 import { updateNeedStatuses } from "./services/statusUpdater.js";
 import { STATUS_UPDATE_INTERVAL } from "./config/constants.js";
+import { connectToDatabase, closeDatabase } from "./services/database.js";
 
 // Ініціалізація бота
 // ⚠️ ВАЖЛИВО: Створіть .env файл з BOT_TOKEN та ADMIN_IDS для безпеки!
@@ -101,7 +102,7 @@ bot.on("text", async (ctx, next) => {
   const msg = ctx.message.text.trim();
 
   // Спробуємо обробити кроки реєстрації
-  if (handleRegisterSteps(ctx, msg)) {
+  if (await handleRegisterSteps(ctx, msg)) {
     return;
   }
 
@@ -116,12 +117,12 @@ bot.on("text", async (ctx, next) => {
   }
 
   // Спробуємо обробити назву уроку для завантаження PDF (адмін)
-  if (handleUploadLessonName(ctx, msg)) {
+  if (await handleUploadLessonName(ctx, msg)) {
     return;
   }
 
   // Спробуємо обробити вибір уроку (користувач)
-  if (handleLessonSelection(ctx, msg)) {
+  if (await handleLessonSelection(ctx, msg)) {
     return;
   }
 
@@ -167,35 +168,55 @@ bot.on("document", async (ctx, next) => {
 // ==================== АВТОМАТИЧНІ ЗАВДАННЯ ====================
 
 // Оновлення статусів заявок кожні 10 хвилин
-setInterval(updateNeedStatuses, STATUS_UPDATE_INTERVAL * 60 * 1000);
+setInterval(() => {
+  updateNeedStatuses().catch((err) => {
+    logError("Помилка при автоматичному оновленні статусів", err);
+  });
+}, STATUS_UPDATE_INTERVAL * 60 * 1000);
 
 // ==================== ЗАПУСК БОТА ====================
 
-bot.launch().then(async () => {
-  logInfo("Bot запущено і він слухає команди...");
-  console.log("✅ Bot запущено і він слухає команди...");
-  
-  // Налаштування меню команд (тільки для звичайних користувачів)
+// Підключення до MongoDB перед запуском бота
+(async () => {
   try {
-    const { regularUserCommands } = await import("./utils/botMenu.js");
-    await bot.telegram.setMyCommands(regularUserCommands);
-    logInfo("Меню команд бота налаштовано");
+    await connectToDatabase();
+    logInfo("Підключено до MongoDB", {});
+    
+      bot.launch().then(async () => {
+        logInfo("Bot запущено і він слухає команди...");
+        console.log("✅ Bot запущено і він слухає команди...");
+        
+        // Налаштування меню команд (тільки для звичайних користувачів)
+        try {
+          const { regularUserCommands } = await import("./utils/botMenu.js");
+          await bot.telegram.setMyCommands(regularUserCommands);
+          logInfo("Меню команд бота налаштовано");
+        } catch (err) {
+          logError("Помилка налаштування меню команд", err);
+          // Не критична помилка, продовжуємо роботу
+        }
+      }).catch((err) => {
+        logError("Помилка запуску бота", err);
+        console.error("❌ Помилка запуску бота:", err);
+        process.exit(1);
+      });
   } catch (err) {
-    logError("Помилка налаштування меню команд", err);
-    // Не критична помилка, продовжуємо роботу
+    logError("Помилка підключення до MongoDB", err);
+    console.error("❌ Помилка підключення до MongoDB:", err);
+    process.exit(1);
   }
-}).catch((err) => {
-  logError("Помилка запуску бота", err);
-  console.error("❌ Помилка запуску бота:", err);
-  process.exit(1);
-});
+})();
 
 // Graceful shutdown
-process.once("SIGINT", () => {
+process.once("SIGINT", async () => {
   logInfo("Bot зупиняється (SIGINT)");
   bot.stop("SIGINT");
+  await closeDatabase();
+  process.exit(0);
 });
-process.once("SIGTERM", () => {
+process.once("SIGTERM", async () => {
   logInfo("Bot зупиняється (SIGTERM)");
   bot.stop("SIGTERM");
+  await closeDatabase();
+  process.exit(0);
 });

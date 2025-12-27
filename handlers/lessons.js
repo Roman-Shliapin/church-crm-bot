@@ -5,8 +5,8 @@ import { Markup } from "telegraf";
 /**
  * Обробник команди /lessons - показує тільки кнопки з уроками
  */
-export function handleLessons(ctx) {
-  const lessons = readLessons();
+export async function handleLessons(ctx) {
+  const lessons = await readLessons();
 
   if (lessons.length === 0) {
     return ctx.reply("📭 Наразі немає доступних уроків.");
@@ -30,7 +30,7 @@ export function handleLessons(ctx) {
  */
 export async function handleLessonCallback(ctx) {
   const lessonId = parseInt(ctx.match[1]);
-  const lesson = findLessonById(lessonId);
+  const lesson = await findLessonById(lessonId);
 
   if (!lesson) {
     await ctx.answerCbQuery("⚠️ Урок не знайдено");
@@ -57,14 +57,14 @@ export async function handleLessonCallback(ctx) {
 /**
  * Обробка вибору конкретного уроку через текст (застарілий метод, але залишаємо для сумісності)
  */
-export function handleLessonSelection(ctx, msg) {
+export async function handleLessonSelection(ctx, msg) {
   const lessonId = parseInt(msg.trim());
 
   if (isNaN(lessonId) || lessonId < 1) {
     return false;
   }
 
-  const lesson = findLessonById(lessonId);
+  const lesson = await findLessonById(lessonId);
 
   if (!lesson) {
     ctx.reply("⚠️ Урок з таким номером не знайдено.");

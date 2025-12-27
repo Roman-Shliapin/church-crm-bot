@@ -17,7 +17,7 @@ export function handleRegisterStart(ctx) {
 /**
  * Обробка кроків реєстрації через текст
  */
-export function handleRegisterSteps(ctx, msg) {
+export async function handleRegisterSteps(ctx, msg) {
   const step = ctx.session?.step;
   if (!step || (step !== 1 && step !== 2 && step !== 3 && step !== 4)) {
     return false; // Не наш крок
@@ -79,7 +79,7 @@ export function handleRegisterSteps(ctx, msg) {
     };
 
     try {
-      addMember(user);
+      await addMember(user);
       ctx.reply(`✅ Дякуємо, ${user.name}! Ви успішно зареєстровані.`);
       ctx.session = null;
     } catch (err) {
