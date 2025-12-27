@@ -66,15 +66,19 @@ export async function readUnbaptizedMembers() {
     // Строга перевірка на клієнті - виключаємо всіх з baptized === true
     const unbaptizedMembers = allMembers.filter(member => {
       const baptized = member.baptized;
-      // Виключаємо якщо baptized строго дорівнює true (булеве значення)
-      // Включаємо тільки якщо baptized === false, null, undefined, або поле відсутнє
+      
+      // Якщо baptized строго дорівнює true (булеве значення) - виключаємо
       if (baptized === true) {
         return false; // Це хрещений - виключаємо
       }
+      
+      // Якщо baptized є строкою "true" - також виключаємо
       if (baptized === "true") {
         return false; // Це також вважається хрещеним - виключаємо
       }
-      // Включаємо всіх інших (false, null, undefined, відсутнє поле)
+      
+      // Включаємо всіх інших: false, null, undefined, або поле відсутнє
+      // Це означає, що людина не хрещена або статус не встановлено
       return true;
     });
     
@@ -140,8 +144,13 @@ export async function addMember(user) {
       throw new Error("Користувач вже зареєстрований");
     }
     
+    // Переконуємося, що baptized завжди булеве значення (не undefined)
+    if (user.baptized === undefined) {
+      user.baptized = false;
+    }
+    
     await collection.insertOne(user);
-    logSuccess("Member added to MongoDB", { userId: user.id });
+    logSuccess("Member added to MongoDB", { userId: user.id, baptized: user.baptized });
   } catch (err) {
     logError("Помилка додавання member в MongoDB", err);
     throw err;

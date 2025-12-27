@@ -102,10 +102,14 @@ export async function handleRegisterSteps(ctx, msg) {
       return true;
     }
 
+    // Явно встановлюємо baptized - тільки якщо строго true, інакше false
+    // Це гарантує, що поле завжди буде булевим значенням в базі даних
+    const baptized = Boolean(ctx.session.data.baptized === true);
+    
     const user = {
       id: ctx.from.id,
       name: ctx.session.data.name,
-      baptized: ctx.session.data.baptized || false,
+      baptized: baptized, // Завжди булеве значення: true або false
       baptism: ctx.session.data.baptism || "Ще не хрещений",
       birthday: ctx.session.data.birthday,
       phone: validatedPhone,
