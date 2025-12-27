@@ -200,7 +200,7 @@ setInterval(() => {
     bot.launch().then(async () => {
       logInfo("Bot запущено і він слухає команди...");
       console.log("✅ Bot запущено і він слухає команди...");
-      
+
       // Налаштування меню команд (тільки для звичайних користувачів)
       try {
         const { regularUserCommands } = await import("./utils/botMenu.js");
