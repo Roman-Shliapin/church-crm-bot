@@ -1,6 +1,7 @@
 // Обробник молитвенних потреб
 import { Markup } from "telegraf";
 import { readPrayers, addPrayer, findMemberById } from "../services/storage.js";
+import { createMainMenu } from "./commands.js";
 import { formatPrayerMessage, createPrayer } from "../utils/helpers.js";
 import { sanitizeText } from "../utils/validation.js";
 import { generatePrayersExcel, deleteFile } from "../services/excel.js";
@@ -17,12 +18,13 @@ export async function handlePrayStart(ctx) {
     ctx.session = { step: "pray_anonymous", data: { name: member.name } };
     return ctx.reply(
       "🙏 Дякуємо за вашу молитвенну потребу!\n\n" +
-      "Хочете додати ваше ім'я? (напишіть 'так' або 'ні', або просто введіть опис потребі)"
+      "Хочете додати ваше ім'я? (напишіть 'так' або 'ні', або просто введіть опис потребі)",
+      createMainMenu()
     );
   } else {
     // Гість - анонімно
     ctx.session = { step: "pray_description", data: { name: null } };
-    return ctx.reply("🙏 Опишіть, будь ласка, молитвенну потребу:");
+    return ctx.reply("🙏 Опишіть, будь ласка, молитвенну потребу:", createMainMenu());
   }
 }
 

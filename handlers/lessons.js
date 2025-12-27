@@ -1,6 +1,7 @@
 // Обробник біблійних уроків
 import { readLessons, findLessonById } from "../services/storage.js";
 import { Markup } from "telegraf";
+import { createMainMenu } from "./commands.js";
 
 /**
  * Обробник команди /lessons - показує тільки кнопки з уроками
@@ -9,7 +10,7 @@ export async function handleLessons(ctx) {
   const lessons = await readLessons();
 
   if (lessons.length === 0) {
-    return ctx.reply("📭 Наразі немає доступних уроків.");
+    return ctx.reply("📭 Наразі немає доступних уроків.", createMainMenu());
   }
 
   // Створюємо inline кнопки для вибору уроку (тільки кнопки, без тексту)

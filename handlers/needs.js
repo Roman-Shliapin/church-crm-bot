@@ -1,6 +1,7 @@
 // Обробник заявок на допомогу
 import { Markup } from "telegraf";
 import { readNeeds, addNeed, findMemberById, findNeedById, updateNeedStatus } from "../services/storage.js";
+import { createMainMenu } from "./commands.js";
 import { isAdmin } from "../middlewares/admin.js";
 import { ADMIN_IDS, STATUS_MAP, NEED_STATUS } from "../config/constants.js";
 import { formatNeedMessage, createAdminNotification, createNeed } from "../utils/helpers.js";
@@ -17,11 +18,11 @@ export async function handleNeedStart(ctx) {
   if (member) {
     // Член церкви - тільки опис
     ctx.session = { step: "need_description", data: { user: member } };
-    return ctx.reply("✍️ Опишіть, будь ласка, вашу потребу:");
+    return ctx.reply("✍️ Опишіть, будь ласка, вашу потребу:", createMainMenu());
   } else {
     // Гість - збираємо дані
     ctx.session = { step: "need_guest_name", data: {} };
-    return ctx.reply("👋 Вкажіть, будь ласка, ваше ім'я та прізвище:");
+    return ctx.reply("👋 Вкажіть, будь ласка, ваше ім'я та прізвище:", createMainMenu());
   }
 }
 
@@ -136,7 +137,7 @@ export async function handleNeedSteps(ctx, msg) {
     });
 
     await addNeed(need);
-    await ctx.reply("✅ Дякуємо! Ваша заявка збережена. Ми з вами зв'яжемось 🙏");
+    await ctx.reply("✅ Дякуємо! Ваша заявка збережена. Ми з вами зв'яжемось 🙏", createMainMenu());
 
     // Повідомлення адмінам
     await notifyAdmins(ctx, need);
@@ -161,7 +162,7 @@ export async function handleNeedSteps(ctx, msg) {
     });
 
     await addNeed(need);
-    await ctx.reply("✅ Ваша заявка на допомогу збережена 🙏");
+    await ctx.reply("✅ Ваша заявка на допомогу збережена 🙏", createMainMenu());
 
     // Повідомлення адмінам
     await notifyAdmins(ctx, need);
@@ -179,10 +180,17 @@ async function notifyAdmins(ctx, need) {
   const adminMessage = createAdminNotification(need);
   console.log("🟢 Надсилаю повідомлення адмінам:", ADMIN_IDS);
 
+  const replyKeyboard = Markup.inlineKeyboard([
+    [
+      Markup.button.callback("💬 Написати відповідь", `reply_need_${need.id}`)
+    ]
+  ]);
+
   for (const adminId of ADMIN_IDS) {
     try {
       await ctx.telegram.sendMessage(adminId, adminMessage, {
         parse_mode: "Markdown",
+        reply_markup: replyKeyboard.reply_markup,
       });
     } catch (err) {
       console.error("❌ Помилка надсилання адміну:", err);
@@ -238,5 +246,64 @@ export async function handleNeedStatusChange(ctx) {
   } catch (err) {
     console.error("Помилка оновлення повідомлення:", err);
   }
+}
+
+/**
+ * Обробник кнопки "Написати відповідь" на заявку
+ */
+export async function handleNeedReplyStart(ctx) {
+  const needId = parseInt(ctx.match[1]);
+  const need = await findNeedById(needId);
+
+  if (!need) {
+    return ctx.answerCbQuery("⚠️ Заявка не знайдена");
+  }
+
+  // Зберігаємо в сесії, що адмін хоче відповісти на цю заявку
+  ctx.session = {
+    step: "need_reply_text",
+    data: { needId, userId: need.userId }
+  };
+
+  await ctx.answerCbQuery("✍️ Введіть текст відповіді:");
+  await ctx.reply(
+    `✍️ Введіть текст відповіді для ${need.name}:\n\n` +
+    `(Ви можете використати до 4000 символів)`
+  );
+}
+
+/**
+ * Обробка тексту відповіді адміна на заявку
+ */
+export async function handleNeedReplyText(ctx, msg) {
+  const step = ctx.session?.step;
+  if (step !== "need_reply_text") {
+    return false;
+  }
+
+  const { needId, userId } = ctx.session.data;
+  const sanitizedText = sanitizeText(msg, 4000);
+  
+  if (!sanitizedText) {
+    await ctx.reply("⚠️ Текст не може бути порожнім або перевищувати 4000 символів.");
+    return true;
+  }
+
+  try {
+    // Відправляємо повідомлення користувачу
+    const userMessage = `📬 *Відповідь на вашу заявку:*\n\n${sanitizedText}`;
+    await ctx.telegram.sendMessage(userId, userMessage, {
+      parse_mode: "Markdown",
+    });
+
+    await ctx.reply("✅ Відповідь успішно надіслана!");
+    ctx.session = null;
+  } catch (err) {
+    console.error("Помилка надсилання відповіді:", err);
+    await ctx.reply("⚠️ Помилка надсилання відповіді. Можливо, користувач заблокував бота.");
+    ctx.session = null;
+  }
+
+  return true;
 }
 

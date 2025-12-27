@@ -7,10 +7,10 @@ import http from "http";
 dotenv.config();
 
 // Імпорт обробників команд
-import { handleStart, handleHelp } from "./handlers/commands.js";
+import { handleStart, handleHelp, createMainMenu } from "./handlers/commands.js";
 import { handleRegisterStart, handleRegisterSteps } from "./handlers/register.js";
 import { handleMe, handleMembers, handleMembersShowChat, handleMembersShowExcel } from "./handlers/members.js";
-import { handleNeedStart, handleNeedSteps, handleNeedsList, handleNeedsShowChat, handleNeedsShowExcel, handleNeedStatusChange } from "./handlers/needs.js";
+import { handleNeedStart, handleNeedSteps, handleNeedsList, handleNeedsShowChat, handleNeedsShowExcel, handleNeedStatusChange, handleNeedReplyStart, handleNeedReplyText } from "./handlers/needs.js";
 import { handlePrayStart, handlePraySteps, handlePrayersList, handlePrayersShowChat, handlePrayersShowExcel } from "./handlers/prayers.js";
 import { handleLessons, handleLessonSelection, handleLessonCallback } from "./handlers/lessons.js";
 import { handleUploadLessonStart, handleUploadLessonName, handleUploadLessonFile } from "./handlers/lessonsAdmin.js";
@@ -130,6 +130,11 @@ bot.on("text", async (ctx, next) => {
     return;
   }
 
+  // Спробуємо обробити текст відповіді адміна на заявку
+  if (await handleNeedReplyText(ctx, msg)) {
+    return;
+  }
+
   // Якщо нічого не підійшло - передаємо далі
   return next();
 });
@@ -138,6 +143,9 @@ bot.on("text", async (ctx, next) => {
 
 // Зміна статусу заявки
 bot.action(/status_(\d+)_(\w+)/, handleNeedStatusChange);
+
+// Відповідь на заявку (кнопка "Написати відповідь")
+bot.action(/reply_need_(\d+)/, checkAdmin, handleNeedReplyStart);
 
 // Вибір формату для заявок
 bot.action("needs_show_chat", handleNeedsShowChat);

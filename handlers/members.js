@@ -1,7 +1,8 @@
 // Обробник команди /members (тільки для адмінів)
 import { Markup } from "telegraf";
-import { readMembers } from "../services/storage.js";
+import { readMembers, findMemberById } from "../services/storage.js";
 import { generateMembersExcel, deleteFile } from "../services/excel.js";
+import { createMainMenu } from "./commands.js";
 
 /**
  * Обробник команди /members - показує вибір формату (тільки для адмінів)
@@ -60,13 +61,11 @@ export async function handleMembersShowExcel(ctx) {
 /**
  * Обробник команди /me - показує профіль користувача
  */
-import { findMemberById } from "../services/storage.js";
-
 export async function handleMe(ctx) {
   const member = await findMemberById(ctx.from.id);
 
   if (!member) {
-    await ctx.reply("Вибачте, ви ще не зареєстровані ❌");
+    await ctx.reply("Вибачте, ви ще не зареєстровані ❌", createMainMenu());
   } else {
     const message =
       `👤 *Ваш профіль*\n\n` +
@@ -74,7 +73,7 @@ export async function handleMe(ctx) {
       `📅 Хрещення: ${member.baptism}\n` +
       `🎂 День народження: ${member.birthday || "не вказано"}\n` +
       `📞 Телефон: ${member.phone}`;
-    await ctx.replyWithMarkdown(message);
+    await ctx.replyWithMarkdown(message, createMainMenu());
   }
 }
 
