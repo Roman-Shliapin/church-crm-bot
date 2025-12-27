@@ -21,7 +21,19 @@ export async function connectToDatabase() {
   }
 
   try {
-    client = new MongoClient(uri);
+    // Додаємо опції для підключення, щоб уникнути SSL помилок
+    const clientOptions = {
+      serverSelectionTimeoutMS: 30000, // Таймаут 30 секунд
+      socketTimeoutMS: 45000, // Таймаут сокету
+      connectTimeoutMS: 30000, // Таймаут підключення
+      maxPoolSize: 10, // Максимальна кількість з'єднань
+      minPoolSize: 1, // Мінімальна кількість з'єднань
+      // Додаткові опції для стабільності підключення
+      retryWrites: true,
+      retryReads: true,
+    };
+    
+    client = new MongoClient(uri, clientOptions);
     await client.connect();
     db = client.db(); // Використовуємо базу даних з connection string
     
