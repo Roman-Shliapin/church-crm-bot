@@ -87,7 +87,7 @@ bot.command("prayers", checkAdmin, handlePrayersList);
 bot.command("lessons", handleLessons);
 
 // /contact - контакти служителів
-bot.command("contact", handleContact);
+bot.command("contacts", handleContact);
 
 // /announce - зробити оголошення (тільки для адмінів)
 bot.command("announce", checkAdmin, handleAnnounceStart);
