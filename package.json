@@ -1,0 +1,22 @@
+{
+  "name": "church-crm-bot",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js",
+    "setup": "node scripts/setup-env.js",
+    "setup-menu": "node scripts/setup-bot-menu.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "Roman Shliapin <romashlaypin@gmail.com>",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "exceljs": "^4.4.0",
+    "fs": "^0.0.1-security",
+    "telegraf": "^4.16.3"
+  }
+}

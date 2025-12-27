@@ -1,0 +1,26 @@
+# Залежності
+node_modules/
+
+# Змінні оточення
+.env
+
+# Файли даних - НЕ комітити! Містять особисті дані!
+members.json
+needs.json
+prayers.json
+lessons.json
+
+
+# Excel файли
+*.xlsx
+
+# Логи
+*.log
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
