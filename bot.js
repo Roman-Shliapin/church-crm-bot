@@ -1,6 +1,7 @@
 // Головний файл бота - точка входу
 import { Telegraf, session } from "telegraf";
 import dotenv from "dotenv";
+import http from "http";
 
 // Завантаження змінних оточення
 dotenv.config();
@@ -55,7 +56,6 @@ bot.use(rateLimit(20, 60 * 1000)); // 20 повідомлень на хвили�
 cleanupOldLogs();
 
 // ==================== КОМАНДИ ====================
-// валдцвадцватцазца
 // /start - привітання
 bot.start(handleStart);
 
@@ -185,24 +185,36 @@ setInterval(() => {
     await connectToDatabase();
     logInfo("Підключено до MongoDB", {});
     
-      bot.launch().then(async () => {
-        logInfo("Bot запущено і він слухає команди...");
-        console.log("✅ Bot запущено і він слухає команди...");
-        
-        // Налаштування меню команд (тільки для звичайних користувачів)
-        try {
-          const { regularUserCommands } = await import("./utils/botMenu.js");
-          await bot.telegram.setMyCommands(regularUserCommands);
-          logInfo("Меню команд бота налаштовано");
-        } catch (err) {
-          logError("Помилка налаштування меню команд", err);
-          // Не критична помилка, продовжуємо роботу
-        }
-      }).catch((err) => {
-        logError("Помилка запуску бота", err);
-        console.error("❌ Помилка запуску бота:", err);
-        process.exit(1);
-      });
+    // Запуск HTTP сервера для Render (має слухати на порту)
+    const PORT = process.env.PORT || 3000;
+    const server = http.createServer((req, res) => {
+      res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end("Bot is running");
+    });
+    
+    server.listen(PORT, () => {
+      console.log(`✅ HTTP сервер слухає на порту ${PORT}`);
+      logInfo(`HTTP сервер слухає на порту ${PORT}`, {});
+    });
+    
+    bot.launch().then(async () => {
+      logInfo("Bot запущено і він слухає команди...");
+      console.log("✅ Bot запущено і він слухає команди...");
+      
+      // Налаштування меню команд (тільки для звичайних користувачів)
+      try {
+        const { regularUserCommands } = await import("./utils/botMenu.js");
+        await bot.telegram.setMyCommands(regularUserCommands);
+        logInfo("Меню команд бота налаштовано");
+      } catch (err) {
+        logError("Помилка налаштування меню команд", err);
+        // Не критична помилка, продовжуємо роботу
+      }
+    }).catch((err) => {
+      logError("Помилка запуску бота", err);
+      console.error("❌ Помилка запуску бота:", err);
+      process.exit(1);
+    });
   } catch (err) {
     logError("Помилка підключення до MongoDB", err);
     console.error("❌ Помилка підключення до MongoDB:", err);

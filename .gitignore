@@ -9,7 +9,7 @@ members.json
 needs.json
 prayers.json
 lessons.json
-
+.md
 
 # Excel файли
 *.xlsx
