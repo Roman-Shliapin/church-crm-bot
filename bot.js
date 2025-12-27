@@ -8,8 +8,7 @@ dotenv.config();
 // Імпорт обробників команд
 import { handleStart, handleHelp } from "./handlers/commands.js";
 import { handleRegisterStart, handleRegisterSteps } from "./handlers/register.js";
-import { handleMe } from "./handlers/members.js";
-import { handleMembers } from "./handlers/members.js";
+import { handleMe, handleMembers, handleMembersShowChat, handleMembersShowExcel } from "./handlers/members.js";
 import { handleNeedStart, handleNeedSteps, handleNeedsList, handleNeedsShowChat, handleNeedsShowExcel, handleNeedStatusChange } from "./handlers/needs.js";
 import { handlePrayStart, handlePraySteps, handlePrayersList, handlePrayersShowChat, handlePrayersShowExcel } from "./handlers/prayers.js";
 import { handleLessons, handleLessonSelection, handleLessonCallback } from "./handlers/lessons.js";
@@ -44,7 +43,7 @@ bot.use(session());
 
 // Логування middleware
 import { loggingMiddleware, securityLoggingMiddleware } from "./middlewares/logging.js";
-import { logInfo, cleanupOldLogs } from "./utils/logger.js";
+import { logInfo, logError, cleanupOldLogs } from "./utils/logger.js";
 bot.use(loggingMiddleware);
 bot.use(securityLoggingMiddleware);
 
@@ -147,6 +146,10 @@ bot.action("needs_show_excel", handleNeedsShowExcel);
 // Вибір формату для молитв
 bot.action("prayers_show_chat", handlePrayersShowChat);
 bot.action("prayers_show_excel", handlePrayersShowExcel);
+
+// Вибір формату для списку членів
+bot.action("members_show_chat", handleMembersShowChat);
+bot.action("members_show_excel", handleMembersShowExcel);
 
 // Вибір уроку
 bot.action(/lesson_(\d+)/, handleLessonCallback);

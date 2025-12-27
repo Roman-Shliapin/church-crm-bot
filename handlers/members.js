@@ -1,34 +1,59 @@
 // Обробник команди /members (тільки для адмінів)
+import { Markup } from "telegraf";
 import { readMembers } from "../services/storage.js";
 import { generateMembersExcel, deleteFile } from "../services/excel.js";
 
 /**
- * Обробник команди /members - показує список членів та генерує Excel
+ * Обробник команди /members - показує вибір формату (тільки для адмінів)
  */
 export async function handleMembers(ctx) {
-  ctx.reply("✅ Команда отримана, перевіряю доступ...");
-
   const members = await readMembers();
 
   if (members.length === 0) {
     return ctx.reply("📭 Поки що ніхто не зареєстрований.");
   }
 
-  // Форматування текстового списку
+  ctx.reply(
+    "📋 Список членів церкви\n\n" +
+    `Знайдено членів: ${members.length}\n\n` +
+    "Оберіть формат відображення:",
+    Markup.inlineKeyboard([
+      [
+        Markup.button.callback("💬 Показати в чаті", "members_show_chat"),
+        Markup.button.callback("📊 Excel файл", "members_show_excel"),
+      ],
+    ])
+  );
+}
+
+/**
+ * Показує список членів в чаті
+ */
+export async function handleMembersShowChat(ctx) {
+  await ctx.answerCbQuery("Показую список членів в чаті...");
+  const members = await readMembers();
+
   let message = "📋 *Список зареєстрованих братів і сестер:*\n\n";
   members.forEach((m, i) => {
     message += `${i + 1}. ${m.name}\n📅 Хрещення: ${m.baptism}\n🎂 День народження: ${m.birthday || "не вказано"}\n📞 ${m.phone}\n\n`;
   });
-  ctx.reply(message, { parse_mode: "Markdown" });
+  await ctx.replyWithMarkdown(message);
+}
 
-  // Генерація та надсилання Excel файлу
+/**
+ * Генерує та надсилає Excel файл зі списком членів
+ */
+export async function handleMembersShowExcel(ctx) {
+  await ctx.answerCbQuery("Генерую Excel файл...");
+  const members = await readMembers();
+
   try {
     const filePath = await generateMembersExcel(members);
     await ctx.replyWithDocument({ source: filePath });
     deleteFile(filePath);
   } catch (err) {
     console.error("Помилка генерації Excel:", err);
-    ctx.reply("⚠️ Не вдалося згенерувати Excel файл.");
+    await ctx.reply("⚠️ Не вдалося згенерувати Excel файл.");
   }
 }
 
@@ -41,7 +66,7 @@ export async function handleMe(ctx) {
   const member = await findMemberById(ctx.from.id);
 
   if (!member) {
-    ctx.reply("Вибачте, ви ще не зареєстровані ❌");
+    await ctx.reply("Вибачте, ви ще не зареєстровані ❌");
   } else {
     const message =
       `👤 *Ваш профіль*\n\n` +
@@ -49,7 +74,7 @@ export async function handleMe(ctx) {
       `📅 Хрещення: ${member.baptism}\n` +
       `🎂 День народження: ${member.birthday || "не вказано"}\n` +
       `📞 Телефон: ${member.phone}`;
-    ctx.replyWithMarkdown(message);
+    await ctx.replyWithMarkdown(message);
   }
 }
 
