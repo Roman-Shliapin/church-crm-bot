@@ -100,6 +100,29 @@ bot.command("upload_lesson", checkAdmin, handleUploadLessonStart);
 bot.on("text", async (ctx, next) => {
   const msg = ctx.message.text.trim();
 
+  // Обробка кнопок reply keyboard (повинно бути перед обробкою кроків)
+  if (msg === "📝 Зареєструватися") {
+    return handleRegisterStart(ctx);
+  }
+  if (msg === "👤 Мій профіль") {
+    return handleMe(ctx);
+  }
+  if (msg === "🙏 Подати заявку") {
+    return handleNeedStart(ctx);
+  }
+  if (msg === "💬 Молитвенна потреба") {
+    return handlePrayStart(ctx);
+  }
+  if (msg === "📚 Біблійні уроки") {
+    return handleLessons(ctx);
+  }
+  if (msg === "📞 Контакти") {
+    return handleContact(ctx);
+  }
+  if (msg === "❓ Допомога") {
+    return handleHelp(ctx);
+  }
+
   // Спробуємо обробити кроки реєстрації
   if (await handleRegisterSteps(ctx, msg)) {
     return;
