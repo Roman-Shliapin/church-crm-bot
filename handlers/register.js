@@ -1,17 +1,39 @@
 // Обробник реєстрації членів церкви
+import { Markup } from "telegraf";
 import { addMember } from "../services/storage.js";
 import { validateName, validatePhone, validateBaptismDate, validateBirthDate } from "../utils/validation.js";
+import { createMainMenu } from "./commands.js";
 
 /**
  * Початок процесу реєстрації
  */
 export function handleRegisterStart(ctx) {
   if (ctx.session?.step) {
-    return ctx.reply("Ви вже проходите реєстрацію. Будь ласка, завершіть її.");
+    return ctx.reply("Ви вже проходите реєстрацію. Будь ласка, завершіть її.", createMainMenu());
   }
   ctx.session = { step: 1, data: {} };
-  ctx.reply("🟢 Давай скоріш починати!");
+  ctx.reply("🟢 Давай скоріш починати!", createMainMenu());
   ctx.reply("Введіть, будь ласка, ваше повне ім'я та прізвище:");
+}
+
+/**
+ * Обробник вибору статусу хрещення
+ */
+export async function handleRegisterBaptismStatus(ctx, isBaptized) {
+  ctx.session.data.baptized = isBaptized;
+  
+  if (isBaptized) {
+    // Якщо хрещений - запитуємо дату хрещення
+    ctx.session.step = 3;
+    ctx.answerCbQuery("✅ Обрано: у Христі");
+    ctx.reply("📅 Вкажіть дату вашого хрещення (у форматі ДД-ММ-РРРР):");
+  } else {
+    // Якщо не хрещений - пропускаємо дату хрещення, переходимо до дня народження
+    ctx.session.data.baptism = "Ще не хрещений";
+    ctx.session.step = 4; // Пропускаємо крок 3 (дата хрещення)
+    ctx.answerCbQuery("⏳ Обрано: Ще не хрещений");
+    ctx.reply("🎂 Вкажіть дату вашого народження (у форматі ДД-ММ-РРРР):");
+  }
 }
 
 /**
@@ -19,7 +41,7 @@ export function handleRegisterStart(ctx) {
  */
 export async function handleRegisterSteps(ctx, msg) {
   const step = ctx.session?.step;
-  if (!step || (step !== 1 && step !== 2 && step !== 3 && step !== 4)) {
+  if (!step || (step !== 1 && step !== 2 && step !== 3 && step !== 4 && step !== 5)) {
     return false; // Не наш крок
   }
 
@@ -31,38 +53,48 @@ export async function handleRegisterSteps(ctx, msg) {
       return true;
     }
     ctx.session.data.name = validatedName;
-    ctx.session.step = 2;
-    ctx.reply("📅 Вкажіть дату вашого хрещення (у форматі ДД-ММ-РРРР):");
+    ctx.session.step = 2; // Переходимо до вибору статусу
+    ctx.reply(
+      "🔰 Чи ви вже хрещені?",
+      Markup.inlineKeyboard([
+        [
+          Markup.button.callback("✅ Так, я в Христі", "register_baptized"),
+          Markup.button.callback("⏳ Ще не хрещений", "register_unbaptized"),
+        ],
+      ])
+    );
     return true;
   }
 
-  if (step === 2) {
-    // Крок 2: Дата хрещення - валідація
+  // Крок 2 пропущено - це вибір статусу (обробляється через callback)
+  
+  if (step === 3) {
+    // Крок 3: Дата хрещення (тільки для хрещених) - валідація
     const validatedDate = validateBaptismDate(msg);
     if (!validatedDate) {
       ctx.reply("⚠️ Будь ласка, введіть коректну дату у форматі ДД-ММ-РРРР (наприклад: 15-03-2020).");
       return true;
     }
     ctx.session.data.baptism = validatedDate;
-    ctx.session.step = 3;
+    ctx.session.step = 4;
     ctx.reply("🎂 Вкажіть дату вашого народження (у форматі ДД-ММ-РРРР):");
     return true;
   }
 
-  if (step === 3) {
-    // Крок 3: День народження - валідація
+  if (step === 4) {
+    // Крок 4: День народження - валідація
     const validatedBirthDate = validateBirthDate(msg);
     if (!validatedBirthDate) {
       ctx.reply("⚠️ Будь ласка, введіть коректну дату у форматі ДД-ММ-РРРР (наприклад: 15-03-1990).");
       return true;
     }
     ctx.session.data.birthday = validatedBirthDate;
-    ctx.session.step = 4;
+    ctx.session.step = 5;
     ctx.reply("📞 Вкажіть ваш номер телефону (+380...):");
     return true;
   }
 
-  if (step === 4) {
+  if (step === 5) {
     // Крок 4: Телефон - валідація та завершення реєстрації
     const validatedPhone = validatePhone(msg);
     if (!validatedPhone) {
@@ -73,17 +105,21 @@ export async function handleRegisterSteps(ctx, msg) {
     const user = {
       id: ctx.from.id,
       name: ctx.session.data.name,
-      baptism: ctx.session.data.baptism,
+      baptized: ctx.session.data.baptized || false,
+      baptism: ctx.session.data.baptism || "Ще не хрещений",
       birthday: ctx.session.data.birthday,
       phone: validatedPhone,
     };
 
     try {
       await addMember(user);
-      ctx.reply(`✅ Дякуємо, ${user.name}! Ви успішно зареєстровані.`);
+      const successMessage = user.baptized 
+        ? `✅ Дякуємо, ${user.name}! Ви успішно зареєстровані як член церкви.`
+        : `✅ Дякуємо, ${user.name}! Ви успішно зареєстровані. Ми молимося за вас! 🙏`;
+      ctx.reply(successMessage, createMainMenu());
       ctx.session = null;
     } catch (err) {
-      ctx.reply(`⚠️ Помилка реєстрації: ${err.message}`);
+      ctx.reply(`⚠️ Помилка реєстрації: ${err.message}`, createMainMenu());
       ctx.session = null;
     }
     return true;

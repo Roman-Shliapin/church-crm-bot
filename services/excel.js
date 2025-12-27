@@ -43,6 +43,46 @@ export async function generateMembersExcel(members) {
 }
 
 /**
+ * Генерує Excel файл зі списком нехрещених
+ * @param {Array} candidates - Масив нехрещених
+ * @returns {string} Шлях до створеного файлу
+ */
+export async function generateCandidatesExcel(candidates) {
+  const workbook = new ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet("Нехрещені");
+
+  // Налаштування колонок
+  worksheet.columns = [
+    { header: "№", key: "index", width: 5 },
+    { header: "Ім'я", key: "name", width: 30 },
+    { header: "Статус", key: "baptism", width: 20 },
+    { header: "День народження", key: "birthday", width: 20 },
+    { header: "Телефон", key: "phone", width: 20 },
+    { header: "Telegram ID", key: "id", width: 20 },
+  ];
+
+  // Додавання даних
+  candidates.forEach((candidate, index) => {
+    worksheet.addRow({
+      index: index + 1,
+      name: candidate.name,
+      baptism: candidate.baptism || "Ще не хрещений",
+      birthday: candidate.birthday || "",
+      phone: candidate.phone,
+      id: candidate.id,
+    });
+  });
+
+  // Генерація імені файлу з поточною датою
+  const date = new Date().toISOString().split("T")[0];
+  const filePath = `candidates_${date}.xlsx`;
+
+  // Збереження файлу
+  await workbook.xlsx.writeFile(filePath);
+  return filePath;
+}
+
+/**
  * Генерує Excel файл зі списком заявок на допомогу
  * @param {Array} needs - Масив заявок на допомогу
  * @returns {string} Шлях до створеного файлу

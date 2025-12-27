@@ -1,21 +1,22 @@
 // Головний файл бота - точка входу
 import { Telegraf, session } from "telegraf";
 import dotenv from "dotenv";
-import http from "http";
 
 // Завантаження змінних оточення
 dotenv.config();
 
 // Імпорт обробників команд
 import { handleStart, handleHelp, createMainMenu } from "./handlers/commands.js";
-import { handleRegisterStart, handleRegisterSteps } from "./handlers/register.js";
+import { handleRegisterStart, handleRegisterSteps, handleRegisterBaptismStatus } from "./handlers/register.js";
 import { handleMe, handleMembers, handleMembersShowChat, handleMembersShowExcel } from "./handlers/members.js";
+import { handleCandidates, handleCandidatesShowChat, handleCandidatesShowExcel } from "./handlers/candidates.js";
 import { handleNeedStart, handleNeedSteps, handleNeedsList, handleNeedsShowChat, handleNeedsShowExcel, handleNeedStatusChange, handleNeedReplyStart, handleNeedReplyText } from "./handlers/needs.js";
-import { handlePrayStart, handlePraySteps, handlePrayersList, handlePrayersShowChat, handlePrayersShowExcel } from "./handlers/prayers.js";
+import { handlePrayStart, handlePraySteps, handlePrayersList, handlePrayersShowChat, handlePrayersShowExcel, handlePrayClarifyStart, handlePrayClarifyText, handlePrayClarifyReplyStart, handlePrayClarifyReplyText, handlePrayReplyStart, handlePrayReplyText } from "./handlers/prayers.js";
 import { handleLessons, handleLessonSelection, handleLessonCallback } from "./handlers/lessons.js";
 import { handleUploadLessonStart, handleUploadLessonName, handleUploadLessonFile } from "./handlers/lessonsAdmin.js";
 import { handleContact } from "./handlers/contact.js";
 import { handleAnnounceStart, handleAnnounceText } from "./handlers/announce.js";
+import { handleLiteratureStart, handleLiteratureRequest, handleLiteratureClarifyStart, handleLiteratureClarifyText, handleLiteratureClarifyReplyStart, handleLiteratureClarifyReplyText, handleLiteratureReplyStart, handleLiteratureFinalReplyStart, handleLiteratureReplyText, handleLiteratureReplyDocument } from "./handlers/literature.js";
 
 // Імпорт middleware
 import { checkAdmin } from "./middlewares/admin.js";
@@ -68,8 +69,11 @@ bot.command("register", handleRegisterStart);
 // /me - перегляд власного профілю
 bot.command("me", handleMe);
 
-// /members - список членів (тільки для адмінів)
+// /members - список членів (тільки для адмінів, тільки хрещені)
 bot.command("members", checkAdmin, handleMembers);
+
+// /candidates - список нехрещених (тільки для адмінів)
+bot.command("candidates", checkAdmin, handleCandidates);
 
 // /need - подати заявку на допомогу
 bot.command("need", handleNeedStart);
@@ -88,6 +92,9 @@ bot.command("lessons", handleLessons);
 
 // /contact - контакти служителів
 bot.command("contacts", handleContact);
+
+// /literature - пошук літератури
+bot.command("literature", handleLiteratureStart);
 
 // /announce - зробити оголошення (тільки для адмінів)
 bot.command("announce", checkAdmin, handleAnnounceStart);
@@ -115,6 +122,9 @@ bot.on("text", async (ctx, next) => {
   }
   if (msg === "📚 Біблійні уроки") {
     return handleLessons(ctx);
+  }
+  if (msg === "📖 Пошук літератури") {
+    return handleLiteratureStart(ctx);
   }
   if (msg === "📞 Контакти") {
     return handleContact(ctx);
@@ -158,6 +168,41 @@ bot.on("text", async (ctx, next) => {
     return;
   }
 
+  // Спробуємо обробити текст уточнення адміна на молитву
+  if (await handlePrayClarifyText(ctx, msg)) {
+    return;
+  }
+
+  // Спробуємо обробити текст відповіді користувача на уточнення
+  if (await handlePrayClarifyReplyText(ctx, msg)) {
+    return;
+  }
+
+  // Спробуємо обробити текст фінальної відповіді адміна на молитву
+  if (await handlePrayReplyText(ctx, msg)) {
+    return;
+  }
+
+  // Спробуємо обробити запит на літературу
+  if (await handleLiteratureRequest(ctx, msg)) {
+    return;
+  }
+
+  // Спробуємо обробити текст уточнення адміна на запит літератури
+  if (await handleLiteratureClarifyText(ctx, msg)) {
+    return;
+  }
+
+  // Спробуємо обробити текст відповіді користувача на уточнення літератури
+  if (await handleLiteratureClarifyReplyText(ctx, msg)) {
+    return;
+  }
+
+  // Спробуємо обробити текст відповіді адміна на запит літератури
+  if (await handleLiteratureReplyText(ctx, msg)) {
+    return;
+  }
+
   // Якщо нічого не підійшло - передаємо далі
   return next();
 });
@@ -169,6 +214,27 @@ bot.action(/status_(\d+)_(\w+)/, handleNeedStatusChange);
 
 // Відповідь на заявку (кнопка "Написати відповідь")
 bot.action(/reply_need_(\d+)/, checkAdmin, handleNeedReplyStart);
+
+// Уточнення молитвенної потреби (кнопка "Уточнити")
+bot.action(/clarify_prayer_(\d+)/, checkAdmin, handlePrayClarifyStart);
+
+// Відповідь користувача на уточнення молитви (кнопка "Відповісти")
+bot.action(/reply_clarify_prayer_(\d+)_(\d+)/, handlePrayClarifyReplyStart);
+
+// Фінальна відповідь адміна на молитву (кнопка "Відповісти")
+bot.action(/final_reply_prayer_(\d+)_(\d+)/, checkAdmin, handlePrayReplyStart);
+
+// Уточнення запиту на літературу (кнопка "Уточнити")
+bot.action(/clarify_literature_(\d+)/, checkAdmin, handleLiteratureClarifyStart);
+
+// Відповідь на запит літератури (кнопка "Відповісти")
+bot.action(/reply_literature_(\d+)/, checkAdmin, handleLiteratureReplyStart);
+
+// Відповідь користувача на уточнення літератури (кнопка "Відповісти")
+bot.action(/reply_clarify_literature_(\d+)_(\d+)/, handleLiteratureClarifyReplyStart);
+
+// Фінальна відповідь адміна на запит літератури (кнопка "Відповісти")
+bot.action(/final_reply_literature_(\d+)_(\d+)/, checkAdmin, handleLiteratureFinalReplyStart);
 
 // Вибір формату для заявок
 bot.action("needs_show_chat", handleNeedsShowChat);
@@ -182,8 +248,16 @@ bot.action("prayers_show_excel", handlePrayersShowExcel);
 bot.action("members_show_chat", handleMembersShowChat);
 bot.action("members_show_excel", handleMembersShowExcel);
 
+// Вибір формату для списку нехрещених
+bot.action("candidates_show_chat", handleCandidatesShowChat);
+bot.action("candidates_show_excel", handleCandidatesShowExcel);
+
 // Вибір уроку
 bot.action(/lesson_(\d+)/, handleLessonCallback);
+
+// Вибір статусу хрещення при реєстрації
+bot.action("register_baptized", (ctx) => handleRegisterBaptismStatus(ctx, true));
+bot.action("register_unbaptized", (ctx) => handleRegisterBaptismStatus(ctx, false));
 
 // ==================== ОБРОБКА ДОКУМЕНТІВ ====================
 
@@ -196,6 +270,15 @@ bot.on("document", async (ctx, next) => {
       return; // Обробили документ
     }
   }
+  
+  // Перевіряємо, чи це адмінська сесія відповіді на запит літератури
+  if (ctx.session?.step === "literature_reply_text") {
+    const result = await handleLiteratureReplyDocument(ctx);
+    if (result) {
+      return; // Обробили документ
+    }
+  }
+  
   return next();
 });
 
@@ -215,19 +298,7 @@ setInterval(() => {
   try {
     await connectToDatabase();
     logInfo("Підключено до MongoDB", {});
-    
-    // Запуск HTTP сервера для Render (має слухати на порту)
-    const PORT = process.env.PORT || 3000;
-    const server = http.createServer((req, res) => {
-      res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-      res.end("Bot is running");
-    });
-    
-    server.listen(PORT, () => {
-      console.log(`✅ HTTP сервер слухає на порту ${PORT}`);
-      logInfo(`HTTP сервер слухає на порту ${PORT}`, {});
-    });
-    
+
     bot.launch().then(async () => {
       logInfo("Bot запущено і він слухає команди...");
       console.log("✅ Bot запущено і він слухає команди...");

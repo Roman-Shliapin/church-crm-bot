@@ -1,14 +1,14 @@
 // Обробник команди /members (тільки для адмінів)
 import { Markup } from "telegraf";
-import { readMembers, findMemberById } from "../services/storage.js";
+import { readMembers, readBaptizedMembers, findMemberById } from "../services/storage.js";
 import { generateMembersExcel, deleteFile } from "../services/excel.js";
 import { createMainMenu } from "./commands.js";
 
 /**
- * Обробник команди /members - показує вибір формату (тільки для адмінів)
+ * Обробник команди /members - показує вибір формату (тільки для адмінів, тільки хрещені)
  */
 export async function handleMembers(ctx) {
-  const members = await readMembers();
+  const members = await readBaptizedMembers();
 
   if (members.length === 0) {
     return ctx.reply("📭 Поки що ніхто не зареєстрований.");
@@ -32,7 +32,7 @@ export async function handleMembers(ctx) {
  */
 export async function handleMembersShowChat(ctx) {
   await ctx.answerCbQuery("Показую список членів в чаті...");
-  const members = await readMembers();
+  const members = await readBaptizedMembers();
 
   let message = "📋 *Список зареєстрованих братів і сестер:*\n\n";
   members.forEach((m, i) => {
@@ -46,7 +46,7 @@ export async function handleMembersShowChat(ctx) {
  */
 export async function handleMembersShowExcel(ctx) {
   await ctx.answerCbQuery("Генерую Excel файл...");
-  const members = await readMembers();
+  const members = await readBaptizedMembers();
 
   try {
     const filePath = await generateMembersExcel(members);
@@ -70,7 +70,7 @@ export async function handleMe(ctx) {
     const message =
       `👤 *Ваш профіль*\n\n` +
       `📛 Ім'я: ${member.name}\n` +
-      `📅 Хрещення: ${member.baptism}\n` +
+      `📅 Хрещення: ${member.baptism || (member.baptized === false ? "Ще не хрещений" : "не вказано")}\n` +
       `🎂 День народження: ${member.birthday || "не вказано"}\n` +
       `📞 Телефон: ${member.phone}`;
     await ctx.replyWithMarkdown(message, createMainMenu());

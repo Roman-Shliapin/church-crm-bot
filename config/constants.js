@@ -24,7 +24,8 @@ export const helpMessage =
 export const helpMessageForAdmins =
   helpMessage +
   "\n\n*Команди для служителів:*\n" +
-  "/members — список членів церкви\n" +
+  "/members — список членів церкви (хрещені)\n" +
+  "/candidates — список нехрещених\n" +
   "/needs — усі заявки на допомогу\n" +
   "/prayers — список молитвенних потреб\n" +
   "/announce — зробити оголошення\n" +

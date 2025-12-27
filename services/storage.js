@@ -8,6 +8,7 @@ const COLLECTIONS = {
   NEEDS: "needs",
   PRAYERS: "prayers",
   LESSONS: "lessons",
+  LITERATURE_REQUESTS: "literature_requests",
 };
 
 // ==================== ЧЛЕНИ ЦЕРКВИ ====================
@@ -24,6 +25,62 @@ export async function readMembers() {
     return members.map(({ _id, ...member }) => member);
   } catch (err) {
     logError("Помилка читання members з MongoDB", err);
+    return [];
+  }
+}
+
+/**
+ * Читає тільки хрещених членів церкви з MongoDB
+ * @returns {Promise<Array>} Масив хрещених членів церкви
+ */
+export async function readBaptizedMembers() {
+  try {
+    const collection = await getCollection(COLLECTIONS.MEMBERS);
+    // Знаходимо тільки тих, хто точно хрещений (baptized === true)
+    const members = await collection.find({ baptized: true }).toArray();
+    
+    // Додаткова перевірка на клієнті
+    const filteredMembers = members.filter(member => {
+      const baptized = member.baptized;
+      return baptized === true || baptized === "true";
+    });
+    
+    return filteredMembers.map(({ _id, ...member }) => member);
+  } catch (err) {
+    logError("Помилка читання хрещених members з MongoDB", err);
+    return [];
+  }
+}
+
+/**
+ * Читає тільки нехрещених з MongoDB
+ * @returns {Promise<Array>} Масив нехрещених
+ */
+export async function readUnbaptizedMembers() {
+  try {
+    const collection = await getCollection(COLLECTIONS.MEMBERS);
+    
+    // Отримуємо ВСІХ користувачів для строгої перевірки на клієнті
+    const allMembers = await collection.find({}).toArray();
+    
+    // Строга перевірка на клієнті - виключаємо всіх з baptized === true
+    const unbaptizedMembers = allMembers.filter(member => {
+      const baptized = member.baptized;
+      // Виключаємо якщо baptized строго дорівнює true (булеве значення)
+      // Включаємо тільки якщо baptized === false, null, undefined, або поле відсутнє
+      if (baptized === true) {
+        return false; // Це хрещений - виключаємо
+      }
+      if (baptized === "true") {
+        return false; // Це також вважається хрещеним - виключаємо
+      }
+      // Включаємо всіх інших (false, null, undefined, відсутнє поле)
+      return true;
+    });
+    
+    return unbaptizedMembers.map(({ _id, ...member }) => member);
+  } catch (err) {
+    logError("Помилка читання нехрещених з MongoDB", err);
     return [];
   }
 }
@@ -236,6 +293,25 @@ export async function addPrayer(prayer) {
   }
 }
 
+/**
+ * Знаходить молитву за ID
+ * @param {number} prayerId - ID молитви
+ * @returns {Promise<Object|null>} Об'єкт молитви або null
+ */
+export async function findPrayerById(prayerId) {
+  try {
+    const collection = await getCollection(COLLECTIONS.PRAYERS);
+    const prayer = await collection.findOne({ id: parseInt(prayerId) });
+    if (!prayer) return null;
+    
+    const { _id, ...prayerData } = prayer;
+    return prayerData;
+  } catch (err) {
+    logError("Помилка пошуку prayer в MongoDB", err);
+    return null;
+  }
+}
+
 // ==================== БІБЛІЙНІ УРОКИ ====================
 
 /**
@@ -288,6 +364,42 @@ export async function findLessonById(lessonId) {
     return lessonData;
   } catch (err) {
     logError("Помилка пошуку lesson в MongoDB", err);
+    return null;
+  }
+}
+
+// ==================== ЗАПИТИ ЛІТЕРАТУРИ ====================
+
+/**
+ * Додає новий запит на літературу
+ * @param {Object} request - Об'єкт запиту
+ */
+export async function addLiteratureRequest(request) {
+  try {
+    const collection = await getCollection(COLLECTIONS.LITERATURE_REQUESTS);
+    await collection.insertOne(request);
+    logSuccess("Literature request added to MongoDB", { requestId: request.id });
+  } catch (err) {
+    logError("Помилка додавання literature request в MongoDB", err);
+    throw err;
+  }
+}
+
+/**
+ * Знаходить запит на літературу за ID
+ * @param {number} requestId - ID запиту
+ * @returns {Promise<Object|null>} Об'єкт запиту або null
+ */
+export async function findLiteratureRequestById(requestId) {
+  try {
+    const collection = await getCollection(COLLECTIONS.LITERATURE_REQUESTS);
+    const request = await collection.findOne({ id: parseInt(requestId) });
+    if (!request) return null;
+    
+    const { _id, ...requestData } = request;
+    return requestData;
+  } catch (err) {
+    logError("Помилка пошуку literature request в MongoDB", err);
     return null;
   }
 }

@@ -1,8 +1,9 @@
 // Обробник молитвенних потреб
 import { Markup } from "telegraf";
-import { readPrayers, addPrayer, findMemberById } from "../services/storage.js";
+import { readPrayers, addPrayer, findMemberById, findPrayerById } from "../services/storage.js";
 import { createMainMenu } from "./commands.js";
-import { formatPrayerMessage, createPrayer } from "../utils/helpers.js";
+import { formatPrayerMessage, createPrayer, createAdminPrayerNotification } from "../utils/helpers.js";
+import { ADMIN_IDS } from "../config/constants.js";
 import { sanitizeText } from "../utils/validation.js";
 import { generatePrayersExcel, deleteFile } from "../services/excel.js";
 
@@ -117,7 +118,9 @@ export async function handlePraySteps(ctx, msg) {
         description: sanitizedDescription,
       });
       await addPrayer(prayer);
-      await ctx.reply("✅ Дякуємо! Ваша молитвенна потреба збережена 🙏");
+      await ctx.reply("✅ Дякуємо! Ваша молитвенна потреба збережена 🙏", createMainMenu());
+      // Повідомлення адмінам
+      await notifyAdmins(ctx, prayer);
       ctx.session = null;
       return true;
     }
@@ -136,12 +139,242 @@ export async function handlePraySteps(ctx, msg) {
       description: sanitizedDescription,
     });
 
-    addPrayer(prayer);
-    await ctx.reply("✅ Дякуємо! Ваша молитвенна потреба збережена 🙏");
+    await addPrayer(prayer);
+    await ctx.reply("✅ Дякуємо! Ваша молитвенна потреба збережена 🙏", createMainMenu());
+    // Повідомлення адмінам
+    await notifyAdmins(ctx, prayer);
     ctx.session = null;
     return true;
   }
 
   return false;
+}
+
+/**
+ * Надсилає повідомлення адмінам про нову молитвенну потребу
+ */
+async function notifyAdmins(ctx, prayer) {
+  const adminMessage = createAdminPrayerNotification(prayer);
+  console.log("🟢 Надсилаю повідомлення адмінам про молитву:", ADMIN_IDS);
+
+  const replyKeyboard = Markup.inlineKeyboard([
+    [
+      Markup.button.callback("❓ Уточнити", `clarify_prayer_${prayer.id}`)
+    ]
+  ]);
+
+  for (const adminId of ADMIN_IDS) {
+    try {
+      await ctx.telegram.sendMessage(adminId, adminMessage, {
+        parse_mode: "Markdown",
+        reply_markup: replyKeyboard.reply_markup,
+      });
+    } catch (err) {
+      console.error("❌ Помилка надсилання адміну:", err);
+    }
+  }
+}
+
+/**
+ * Обробник кнопки "Уточнити" на молитвенну потребу
+ */
+export async function handlePrayClarifyStart(ctx) {
+  const prayerId = parseInt(ctx.match[1]);
+  const prayer = await findPrayerById(prayerId);
+
+  if (!prayer) {
+    return ctx.answerCbQuery("⚠️ Молитвенна потреба не знайдена");
+  }
+
+  // Зберігаємо в сесії, що адмін хоче уточнити цю молитву
+  ctx.session = {
+    step: "pray_clarify_text",
+    data: { prayerId, userId: prayer.userId, adminId: ctx.from.id }
+  };
+
+  await ctx.answerCbQuery("✍️ Введіть питання для уточнення:");
+  await ctx.reply(
+    `✍️ Введіть питання для уточнення до ${prayer.name || "користувача"}:\n\n` +
+    `(Ви можете використати до 4000 символів)`
+  );
+}
+
+/**
+ * Обробка тексту уточнення від адміна
+ */
+export async function handlePrayClarifyText(ctx, msg) {
+  const step = ctx.session?.step;
+  if (step !== "pray_clarify_text") {
+    return false;
+  }
+
+  const { prayerId, userId, adminId } = ctx.session.data;
+  const sanitizedText = sanitizeText(msg, 4000);
+  
+  if (!sanitizedText) {
+    await ctx.reply("⚠️ Текст не може бути порожнім або перевищувати 4000 символів.");
+    return true;
+  }
+
+  try {
+    const prayer = await findPrayerById(prayerId);
+    if (!prayer) {
+      await ctx.reply("⚠️ Молитвенна потреба не знайдена.");
+      ctx.session = null;
+      return true;
+    }
+
+    // Відправляємо питання користувачу з кнопкою для відповіді
+    const userMessage = `❓ *Уточнення до вашої молитвенної потреби:*\n\n${sanitizedText}\n\n_Натисніть кнопку нижче, щоб відповісти:_`;
+    await ctx.telegram.sendMessage(userId, userMessage, {
+      parse_mode: "Markdown",
+      reply_markup: Markup.inlineKeyboard([
+        [
+          Markup.button.callback("💬 Відповісти", `reply_clarify_prayer_${prayerId}_${adminId}`)
+        ]
+      ]).reply_markup,
+    });
+
+    await ctx.reply("✅ Питання надіслано користувачу! Очікуємо відповіді.");
+    ctx.session = null;
+  } catch (err) {
+    console.error("Помилка надсилання уточнення:", err);
+    await ctx.reply("⚠️ Помилка надсилання уточнення. Можливо, користувач заблокував бота.");
+    ctx.session = null;
+  }
+
+  return true;
+}
+
+/**
+ * Обробник кнопки "Відповісти" від користувача на уточнення
+ */
+export async function handlePrayClarifyReplyStart(ctx) {
+  const prayerId = parseInt(ctx.match[1]);
+  const adminId = parseInt(ctx.match[2]);
+  const prayer = await findPrayerById(prayerId);
+
+  if (!prayer) {
+    return ctx.answerCbQuery("⚠️ Молитвенна потреба не знайдена");
+  }
+
+  // Зберігаємо в сесії, що користувач хоче відповісти на уточнення
+  ctx.session = {
+    step: "pray_clarify_reply_text",
+    data: { prayerId, adminId }
+  };
+
+  await ctx.answerCbQuery("✍️ Введіть вашу відповідь:");
+  await ctx.reply(
+    `✍️ Введіть вашу відповідь на питання:\n\n` +
+    `(Ви можете використати до 4000 символів)`
+  );
+}
+
+/**
+ * Обробка тексту відповіді користувача на уточнення
+ */
+export async function handlePrayClarifyReplyText(ctx, msg) {
+  const step = ctx.session?.step;
+  if (step !== "pray_clarify_reply_text") {
+    return false;
+  }
+
+  const { prayerId, adminId } = ctx.session.data;
+  const sanitizedText = sanitizeText(msg, 4000);
+  
+  if (!sanitizedText) {
+    await ctx.reply("⚠️ Текст не може бути порожнім або перевищувати 4000 символів.");
+    return true;
+  }
+
+  try {
+    const prayer = await findPrayerById(prayerId);
+    if (!prayer) {
+      await ctx.reply("⚠️ Молитвенна потреба не знайдена.");
+      ctx.session = null;
+      return true;
+    }
+
+    // Відправляємо відповідь адміну з кнопкою для фінальної відповіді
+    const adminMessage = `💬 *Відповідь на уточнення:*\n\n${sanitizedText}\n\n_Від: ${prayer.name || "користувача"}_`;
+    await ctx.telegram.sendMessage(adminId, adminMessage, {
+      parse_mode: "Markdown",
+      reply_markup: Markup.inlineKeyboard([
+        [
+          Markup.button.callback("💬 Відповісти", `final_reply_prayer_${prayerId}_${ctx.from.id}`)
+        ]
+      ]).reply_markup,
+    });
+
+    await ctx.reply("✅ Ваша відповідь надіслана! 🙏", createMainMenu());
+    ctx.session = null;
+  } catch (err) {
+    console.error("Помилка надсилання відповіді:", err);
+    await ctx.reply("⚠️ Помилка надсилання відповіді.");
+    ctx.session = null;
+  }
+
+  return true;
+}
+
+/**
+ * Обробник кнопки "Відповісти" від адміна на отриману відповідь
+ */
+export async function handlePrayReplyStart(ctx) {
+  const prayerId = parseInt(ctx.match[1]);
+  const userId = parseInt(ctx.match[2]);
+  const prayer = await findPrayerById(prayerId);
+
+  if (!prayer) {
+    return ctx.answerCbQuery("⚠️ Молитвенна потреба не знайдена");
+  }
+
+  // Зберігаємо в сесії, що адмін хоче відповісти
+  ctx.session = {
+    step: "pray_reply_text",
+    data: { prayerId, userId }
+  };
+
+  await ctx.answerCbQuery("✍️ Введіть текст відповіді:");
+  await ctx.reply(
+    `✍️ Введіть текст відповіді для ${prayer.name || "користувача"}:\n\n` +
+    `(Ви можете використати до 4000 символів)`
+  );
+}
+
+/**
+ * Обробка тексту фінальної відповіді адміна
+ */
+export async function handlePrayReplyText(ctx, msg) {
+  const step = ctx.session?.step;
+  if (step !== "pray_reply_text") {
+    return false;
+  }
+
+  const { prayerId, userId } = ctx.session.data;
+  const sanitizedText = sanitizeText(msg, 4000);
+  
+  if (!sanitizedText) {
+    await ctx.reply("⚠️ Текст не може бути порожнім або перевищувати 4000 символів.");
+    return true;
+  }
+
+  try {
+    // Відправляємо повідомлення користувачу
+    const userMessage = `📬 *Відповідь на вашу молитвенну потребу:*\n\n${sanitizedText}`;
+    await ctx.telegram.sendMessage(userId, userMessage, {
+      parse_mode: "Markdown",
+    });
+
+    await ctx.reply("✅ Відповідь успішно надіслана!");
+    ctx.session = null;
+  } catch (err) {
+    console.error("Помилка надсилання відповіді:", err);
+    await ctx.reply("⚠️ Помилка надсилання відповіді. Можливо, користувач заблокував бота.");
+    ctx.session = null;
+  }
+
+  return true;
 }
 
