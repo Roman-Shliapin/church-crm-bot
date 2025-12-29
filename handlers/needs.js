@@ -15,13 +15,42 @@ export async function handleNeedStart(ctx) {
   const userId = ctx.from.id;
   const member = await findMemberById(userId);
 
+  ctx.session = { step: "need_type_selection", data: {} };
+  
+  if (member) {
+    // Член церкви - зберігаємо дані користувача
+    ctx.session.data.user = member;
+  }
+
+  return ctx.reply(
+    "🙏 Оберіть тип допомоги:",
+    Markup.inlineKeyboard([
+      [
+        Markup.button.callback("🛒 Гуманітарна допомога", "need_type_humanitarian"),
+      ],
+      [
+        Markup.button.callback("💬 Інше", "need_type_other"),
+      ],
+    ])
+  );
+}
+
+/**
+ * Обробник вибору типу допомоги
+ */
+export async function handleNeedTypeSelection(ctx, needType) {
+  const member = ctx.session?.data?.user;
+  
+  ctx.session.data.needType = needType;
+  ctx.answerCbQuery(`Обрано: ${needType === "humanitarian" ? "Гуманітарна допомога" : "Інше"}`);
+
   if (member) {
     // Член церкви - тільки опис
-    ctx.session = { step: "need_description", data: { user: member } };
+    ctx.session.step = "need_description";
     return ctx.reply("✍️ Опишіть, будь ласка, вашу потребу:", createMainMenu());
   } else {
     // Гість - збираємо дані
-    ctx.session = { step: "need_guest_name", data: {} };
+    ctx.session.step = "need_guest_name";
     return ctx.reply("👋 Вкажіть, будь ласка, ваше ім'я та прізвище:", createMainMenu());
   }
 }
@@ -134,6 +163,7 @@ export async function handleNeedSteps(ctx, msg) {
       baptism: "Не член церкви",
       phone: userData.phone,
       description: sanitizedDescription,
+      type: ctx.session.data.needType || "other",
     });
 
     await addNeed(need);
@@ -159,6 +189,7 @@ export async function handleNeedSteps(ctx, msg) {
       baptism: user.baptism,
       phone: user.phone,
       description: sanitizedDescription,
+      type: ctx.session.data.needType || "other",
     });
 
     await addNeed(need);

@@ -10,12 +10,12 @@ import { handleStart, handleHelp, createMainMenu } from "./handlers/commands.js"
 import { handleRegisterStart, handleRegisterSteps, handleRegisterBaptismStatus } from "./handlers/register.js";
 import { handleMe, handleMembers, handleMembersShowChat, handleMembersShowExcel } from "./handlers/members.js";
 import { handleCandidates, handleCandidatesShowChat, handleCandidatesShowExcel } from "./handlers/candidates.js";
-import { handleNeedStart, handleNeedSteps, handleNeedsList, handleNeedsShowChat, handleNeedsShowExcel, handleNeedStatusChange, handleNeedReplyStart, handleNeedReplyText } from "./handlers/needs.js";
+import { handleNeedStart, handleNeedTypeSelection, handleNeedSteps, handleNeedsList, handleNeedsShowChat, handleNeedsShowExcel, handleNeedStatusChange, handleNeedReplyStart, handleNeedReplyText } from "./handlers/needs.js";
 import { handlePrayStart, handlePraySteps, handlePrayersList, handlePrayersShowChat, handlePrayersShowExcel, handlePrayClarifyStart, handlePrayClarifyText, handlePrayClarifyReplyStart, handlePrayClarifyReplyText, handlePrayReplyStart, handlePrayReplyText } from "./handlers/prayers.js";
 import { handleLessons, handleLessonSelection, handleLessonCallback } from "./handlers/lessons.js";
 import { handleUploadLessonStart, handleUploadLessonName, handleUploadLessonFile } from "./handlers/lessonsAdmin.js";
 import { handleContact } from "./handlers/contact.js";
-import { handleAnnounceStart, handleAnnounceText } from "./handlers/announce.js";
+import { handleAnnounceStart, handleAnnounceAudience, handleAnnounceText } from "./handlers/announce.js";
 import { handleLiteratureStart, handleLiteratureRequest, handleLiteratureClarifyStart, handleLiteratureClarifyText, handleLiteratureClarifyReplyStart, handleLiteratureClarifyReplyText, handleLiteratureReplyStart, handleLiteratureFinalReplyStart, handleLiteratureReplyText, handleLiteratureReplyDocument } from "./handlers/literature.js";
 
 // Імпорт middleware
@@ -258,6 +258,15 @@ bot.action(/lesson_(\d+)/, handleLessonCallback);
 // Вибір статусу хрещення при реєстрації
 bot.action("register_baptized", (ctx) => handleRegisterBaptismStatus(ctx, true));
 bot.action("register_unbaptized", (ctx) => handleRegisterBaptismStatus(ctx, false));
+
+// Вибір типу допомоги
+bot.action("need_type_humanitarian", (ctx) => handleNeedTypeSelection(ctx, "humanitarian"));
+bot.action("need_type_other", (ctx) => handleNeedTypeSelection(ctx, "other"));
+
+// Вибір цільової аудиторії для оголошення (тільки для адмінів)
+bot.action("announce_baptized", checkAdmin, (ctx) => handleAnnounceAudience(ctx, "baptized"));
+bot.action("announce_unbaptized", checkAdmin, (ctx) => handleAnnounceAudience(ctx, "unbaptized"));
+bot.action("announce_all", checkAdmin, (ctx) => handleAnnounceAudience(ctx, "all"));
 
 // ==================== ОБРОБКА ДОКУМЕНТІВ ====================
 

@@ -1,27 +1,60 @@
 // Обробник оголошень (тільки для адмінів)
-import { readMembers } from "../services/storage.js";
-import { checkAdmin } from "../middlewares/admin.js";
+import { Markup } from "telegraf";
+import { readMembers, readBaptizedMembers, readUnbaptizedMembers } from "../services/storage.js";
 import { sanitizeText } from "../utils/validation.js";
 
 /**
- * Обробник команди /announce - створення оголошення (тільки для адмінів)
+ * Обробник команди /announce - початок створення оголошення (тільки для адмінів)
  */
 export function handleAnnounceStart(ctx) {
-  ctx.session = { step: "announce_text", data: {} };
+  ctx.session = { step: "announce_audience", data: {} };
   ctx.reply(
-    "📢 Створення оголошення для всіх членів церкви.\n\n" +
+    "📢 Створення оголошення\n\n" +
+    "Оберіть цільову аудиторію:",
+    Markup.inlineKeyboard([
+      [
+        Markup.button.callback("✅ Для членів церкви (хрещені)", "announce_baptized"),
+      ],
+      [
+        Markup.button.callback("⏳ Для нехрещених (кандидатів)", "announce_unbaptized"),
+      ],
+      [
+        Markup.button.callback("👥 Для всіх зареєстрованих", "announce_all"),
+      ],
+    ])
+  );
+}
+
+/**
+ * Обробник вибору цільової аудиторії
+ */
+export async function handleAnnounceAudience(ctx, audienceType) {
+  ctx.session.data.audienceType = audienceType;
+  ctx.session.step = "announce_text";
+  
+  const audienceNames = {
+    baptized: "членів церкви (хрещених)",
+    unbaptized: "нехрещених (кандидатів)",
+    all: "всіх зареєстрованих",
+  };
+  
+  ctx.answerCbQuery(`Обрано: ${audienceNames[audienceType]}`);
+  ctx.reply(
+    `📢 Оголошення для ${audienceNames[audienceType]}\n\n` +
     "Введіть текст оголошення:"
   );
 }
 
 /**
- * Обробка тексту оголошення та розсилка всім членам
+ * Обробка тексту оголошення та розсилка відповідній аудиторії
  */
 export async function handleAnnounceText(ctx, msg) {
   const step = ctx.session?.step;
   if (step !== "announce_text") {
     return false;
   }
+
+  const audienceType = ctx.session.data?.audienceType || "all";
 
   // Валідація та санітизація тексту оголошення
   const sanitizedText = sanitizeText(msg, 4000);
@@ -30,10 +63,23 @@ export async function handleAnnounceText(ctx, msg) {
     return true;
   }
 
-  const members = await readMembers();
+  // Отримуємо відповідний список користувачів
+  let members = [];
+  let audienceName = "";
+
+  if (audienceType === "baptized") {
+    members = await readBaptizedMembers();
+    audienceName = "хрещених членів церкви";
+  } else if (audienceType === "unbaptized") {
+    members = await readUnbaptizedMembers();
+    audienceName = "нехрещених (кандидатів)";
+  } else {
+    members = await readMembers();
+    audienceName = "всіх зареєстрованих";
+  }
 
   if (members.length === 0) {
-    await ctx.reply("⚠️ Немає зареєстрованих членів церкви для розсилки.");
+    await ctx.reply(`⚠️ Немає ${audienceName} для розсилки.`);
     ctx.session = null;
     return true;
   }
@@ -50,13 +96,13 @@ export async function handleAnnounceText(ctx, msg) {
       });
       sentCount++;
     } catch (err) {
-      console.error(`Помилка надсилання члену ${member.id}:`, err);
+      console.error(`Помилка надсилання користувачу ${member.id}:`, err);
       failedCount++;
     }
   }
 
   await ctx.reply(
-    `✅ Оголошення надіслано!\n\n` +
+    `✅ Оголошення надіслано ${audienceName}!\n\n` +
     `📊 Статистика:\n` +
     `• Відправлено: ${sentCount}\n` +
     `• Не вдалося відправити: ${failedCount}`

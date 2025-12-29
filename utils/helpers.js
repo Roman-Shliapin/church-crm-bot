@@ -6,10 +6,12 @@
  * @returns {string} Відформатоване повідомлення
  */
 export function formatNeedMessage(need) {
+  const typeName = need.type === "humanitarian" ? "🛒 Гуманітарна допомога" : "💬 Інше";
   return (
     `🙋‍♂️ *${need.name}*\n` +
     `📅 Хрещення: ${need.baptism}\n` +
     `📞 ${need.phone}\n` +
+    `🏷️ Тип: ${typeName}\n` +
     `📖 ${need.description}\n` +
     `🕓 ${need.date}\n` +
     `⚙️ *Статус:* ${need.status}`
@@ -22,11 +24,13 @@ export function formatNeedMessage(need) {
  * @returns {string} Повідомлення для адмінів
  */
 export function createAdminNotification(need) {
+  const typeName = need.type === "humanitarian" ? "🛒 Гуманітарна допомога" : "💬 Інше";
   return (
     `📬 *Нова заявка на допомогу!*\n\n` +
     `🙋‍♂️ Ім'я: ${need.name}\n` +
     `📅 Хрещення: ${need.baptism}\n` +
     `📞 Телефон: ${need.phone}\n` +
+    `🏷️ Тип: ${typeName}\n` +
     `📖 Потреба: ${need.description}\n` +
     `🕓 Дата подання: ${need.date}`
   );
@@ -40,9 +44,10 @@ export function createAdminNotification(need) {
  * @param {string} params.baptism - Дата хрещення
  * @param {string} params.phone - Номер телефону
  * @param {string} params.description - Опис потреби
+ * @param {string} params.type - Тип допомоги (humanitarian/other)
  * @returns {Object} Об'єкт заявки
  */
-export function createNeed({ userId, name, baptism, phone, description }) {
+export function createNeed({ userId, name, baptism, phone, description, type = "other" }) {
   return {
     id: Date.now(),
     userId,
@@ -50,6 +55,7 @@ export function createNeed({ userId, name, baptism, phone, description }) {
     baptism,
     phone,
     description,
+    type,
     date: new Date().toLocaleString("uk-UA"),
     status: "нове",
   };

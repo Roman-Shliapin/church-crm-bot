@@ -5,6 +5,7 @@ import { logError, logSuccess } from "../utils/logger.js";
 // Назви колекцій в MongoDB
 const COLLECTIONS = {
   MEMBERS: "members",
+  CANDIDATES: "candidates",
   NEEDS: "needs",
   PRAYERS: "prayers",
   LESSONS: "lessons",
@@ -14,15 +15,22 @@ const COLLECTIONS = {
 // ==================== ЧЛЕНИ ЦЕРКВИ ====================
 
 /**
- * Читає всіх членів церкви з MongoDB
- * @returns {Promise<Array>} Масив членів церкви
+ * Читає всіх зареєстрованих користувачів з MongoDB (і членів, і кандидатів)
+ * @returns {Promise<Array>} Масив всіх зареєстрованих
  */
 export async function readMembers() {
   try {
-    const collection = await getCollection(COLLECTIONS.MEMBERS);
-    const members = await collection.find({}).toArray();
-    // Прибираємо MongoDB _id поле для сумісності
-    return members.map(({ _id, ...member }) => member);
+    // Читаємо хрещених з members
+    const membersCollection = await getCollection(COLLECTIONS.MEMBERS);
+    const members = await membersCollection.find({}).toArray();
+    
+    // Читаємо нехрещених з candidates
+    const candidatesCollection = await getCollection(COLLECTIONS.CANDIDATES);
+    const candidates = await candidatesCollection.find({}).toArray();
+    
+    // Об'єднуємо та прибираємо MongoDB _id поле
+    const all = [...members, ...candidates];
+    return all.map(({ _id, ...member }) => member);
   } catch (err) {
     logError("Помилка читання members з MongoDB", err);
     return [];
@@ -53,36 +61,14 @@ export async function readBaptizedMembers() {
 }
 
 /**
- * Читає тільки нехрещених з MongoDB
+ * Читає тільки нехрещених з MongoDB (з колекції candidates)
  * @returns {Promise<Array>} Масив нехрещених
  */
 export async function readUnbaptizedMembers() {
   try {
-    const collection = await getCollection(COLLECTIONS.MEMBERS);
-    
-    // Отримуємо ВСІХ користувачів для строгої перевірки на клієнті
-    const allMembers = await collection.find({}).toArray();
-    
-    // Строга перевірка на клієнті - виключаємо всіх з baptized === true
-    const unbaptizedMembers = allMembers.filter(member => {
-      const baptized = member.baptized;
-      
-      // Якщо baptized строго дорівнює true (булеве значення) - виключаємо
-      if (baptized === true) {
-        return false; // Це хрещений - виключаємо
-      }
-      
-      // Якщо baptized є строкою "true" - також виключаємо
-      if (baptized === "true") {
-        return false; // Це також вважається хрещеним - виключаємо
-      }
-      
-      // Включаємо всіх інших: false, null, undefined, або поле відсутнє
-      // Це означає, що людина не хрещена або статус не встановлено
-      return true;
-    });
-    
-    return unbaptizedMembers.map(({ _id, ...member }) => member);
+    const collection = await getCollection(COLLECTIONS.CANDIDATES);
+    const candidates = await collection.find({}).toArray();
+    return candidates.map(({ _id, ...candidate }) => candidate);
   } catch (err) {
     logError("Помилка читання нехрещених з MongoDB", err);
     return [];
@@ -111,49 +97,112 @@ export async function writeMembers(members) {
 }
 
 /**
- * Знаходить члена церкви за Telegram ID
+ * Знаходить члена церкви або кандидата за Telegram ID
  * @param {number} userId - Telegram ID користувача
- * @returns {Promise<Object|null>} Об'єкт члена церкви або null
+ * @returns {Promise<Object|null>} Об'єкт члена церкви/кандидата або null
  */
 export async function findMemberById(userId) {
   try {
-    const collection = await getCollection(COLLECTIONS.MEMBERS);
-    const member = await collection.findOne({ id: userId });
-    if (!member) return null;
+    // Спочатку шукаємо в members (хрещені)
+    const membersCollection = await getCollection(COLLECTIONS.MEMBERS);
+    let member = await membersCollection.findOne({ id: userId });
     
-    // Прибираємо MongoDB _id поле
-    const { _id, ...memberData } = member;
-    return memberData;
+    if (member) {
+      const { _id, ...memberData } = member;
+      return memberData;
+    }
+    
+    // Якщо не знайдено в members, шукаємо в candidates (нехрещені)
+    const candidatesCollection = await getCollection(COLLECTIONS.CANDIDATES);
+    member = await candidatesCollection.findOne({ id: userId });
+    
+    if (member) {
+      const { _id, ...memberData } = member;
+      return memberData;
+    }
+    
+    return null;
   } catch (err) {
-    logError("Помилка пошуку member в MongoDB", err);
+    logError("Помилка пошуку member/candidate в MongoDB", err);
     return null;
   }
 }
 
 /**
- * Додає нового члена церкви
+ * Додає нового члена церкви або кандидата
  * @param {Object} user - Об'єкт з даними користувача
  */
 export async function addMember(user) {
   try {
-    const collection = await getCollection(COLLECTIONS.MEMBERS);
-    
-    // Перевіряємо, чи користувач не зареєстрований
-    const existing = await collection.findOne({ id: user.id });
-    if (existing) {
-      throw new Error("Користувач вже зареєстрований");
-    }
-    
     // Переконуємося, що baptized завжди булеве значення (не undefined)
     if (user.baptized === undefined) {
       user.baptized = false;
     }
     
-    await collection.insertOne(user);
-    logSuccess("Member added to MongoDB", { userId: user.id, baptized: user.baptized });
+    if (user.baptized === true) {
+      // Хрещений - зберігаємо в members
+      const collection = await getCollection(COLLECTIONS.MEMBERS);
+      
+      // Перевіряємо, чи користувач не зареєстрований
+      const existing = await collection.findOne({ id: user.id });
+      if (existing) {
+        throw new Error("Користувач вже зареєстрований");
+      }
+      
+      await collection.insertOne(user);
+      logSuccess("Member added to MongoDB (members)", { userId: user.id, baptized: user.baptized });
+    } else {
+      // Нехрещений - зберігаємо в candidates
+      const collection = await getCollection(COLLECTIONS.CANDIDATES);
+      
+      // Перевіряємо, чи користувач не зареєстрований
+      const existing = await collection.findOne({ id: user.id });
+      if (existing) {
+        throw new Error("Користувач вже зареєстрований");
+      }
+      
+      await collection.insertOne(user);
+      logSuccess("Candidate added to MongoDB (candidates)", { userId: user.id, baptized: user.baptized });
+    }
   } catch (err) {
-    logError("Помилка додавання member в MongoDB", err);
+    logError("Помилка додавання member/candidate в MongoDB", err);
     throw err;
+  }
+}
+
+// ==================== КАНДИДАТИ (НЕХРЕЩЕНІ) ====================
+
+/**
+ * Читає всіх кандидатів (нехрещених) з MongoDB
+ * @returns {Promise<Array>} Масив кандидатів
+ */
+export async function readCandidates() {
+  try {
+    const collection = await getCollection(COLLECTIONS.CANDIDATES);
+    const candidates = await collection.find({}).toArray();
+    return candidates.map(({ _id, ...candidate }) => candidate);
+  } catch (err) {
+    logError("Помилка читання candidates з MongoDB", err);
+    return [];
+  }
+}
+
+/**
+ * Знаходить кандидата за Telegram ID
+ * @param {number} userId - Telegram ID користувача
+ * @returns {Promise<Object|null>} Об'єкт кандидата або null
+ */
+export async function findCandidateById(userId) {
+  try {
+    const collection = await getCollection(COLLECTIONS.CANDIDATES);
+    const candidate = await collection.findOne({ id: userId });
+    if (!candidate) return null;
+    
+    const { _id, ...candidateData } = candidate;
+    return candidateData;
+  } catch (err) {
+    logError("Помилка пошуку candidate в MongoDB", err);
+    return null;
   }
 }
 
