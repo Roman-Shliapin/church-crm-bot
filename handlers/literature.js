@@ -80,7 +80,7 @@ export async function handleLiteratureRequest(ctx, msg) {
  */
 function createAdminLiteratureMenu() {
   return Markup.keyboard([
-    ["❓ Уточнити", "💬 Відповісти"]
+    ["📚 Уточнити", "📚 Відповісти"]
   ])
     .resize()
     .persistent();
@@ -91,7 +91,7 @@ function createAdminLiteratureMenu() {
  */
 function createAdminLiteratureClarifyReplyMenu() {
   return Markup.keyboard([
-    ["💬 Остаточна відповідь", "🏠 На головне меню"]
+    ["📚 Остаточна відповідь", "🏠 На головне меню"]
   ])
     .resize()
     .persistent();
@@ -144,7 +144,7 @@ export async function handleLiteratureClarifyStart(ctx, msg = null) {
   let requestId;
   
   // Якщо викликано через reply keyboard (msg містить текст кнопки)
-  if (msg && msg === "❓ Уточнити") {
+  if (msg && msg === "📚 Уточнити") {
     // Отримуємо requestId з сесії адміна
     if (global.adminLiteratureSessions && global.adminLiteratureSessions.has(ctx.from.id)) {
       requestId = global.adminLiteratureSessions.get(ctx.from.id);
@@ -338,7 +338,7 @@ export async function handleLiteratureReplyStart(ctx, msg = null) {
   let requestId;
   
   // Якщо викликано через reply keyboard (msg містить текст кнопки)
-  if (msg && (msg === "💬 Відповісти" || msg === "💬 Остаточна відповідь")) {
+  if (msg && (msg === "📚 Відповісти" || msg === "📚 Остаточна відповідь")) {
     // Отримуємо requestId з сесії адміна
     if (global.adminLiteratureSessions && global.adminLiteratureSessions.has(ctx.from.id)) {
       requestId = global.adminLiteratureSessions.get(ctx.from.id);

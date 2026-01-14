@@ -218,13 +218,10 @@ bot.on("text", async (ctx, next) => {
   }
 
   // Обробка кнопок адміна для молитвених потреб (reply keyboard)
-  if (msg === "❓ Уточнити") {
+  if (msg === "🙏 Уточнити") {
     return handlePrayClarifyStart(ctx, msg);
   }
-  if (msg === "💬 Відповісти") {
-    return handlePrayReplyStart(ctx, msg);
-  }
-  if (msg === "💬 Остаточна відповідь") {
+  if (msg === "🙏 Відповісти" || msg === "🙏 Остаточна відповідь") {
     return handlePrayReplyStart(ctx, msg);
   }
   if (msg === "🏠 На головне меню") {
@@ -237,34 +234,11 @@ bot.on("text", async (ctx, next) => {
   }
 
   // Обробка кнопок адміна для запитів на літературу (reply keyboard)
-  // Перевіряємо, чи є активна сесія для літератури (перевіряємо після молитв, щоб не конфліктувати)
-  if (msg === "❓ Уточнити") {
-    // Перевіряємо, чи це для літератури (якщо є сесія для літератури)
-    if (global.adminLiteratureSessions && global.adminLiteratureSessions.has(ctx.from.id)) {
-      // Перевіряємо, чи це не для молитв
-      if (!(global.adminPrayerSessions && global.adminPrayerSessions.has(ctx.from.id))) {
-        return handleLiteratureClarifyStart(ctx, msg);
-      }
-    }
+  if (msg === "📚 Уточнити") {
+    return handleLiteratureClarifyStart(ctx, msg);
   }
-  if (msg === "💬 Відповісти") {
-    // Перевіряємо, чи це для літератури
-    if (global.adminLiteratureSessions && global.adminLiteratureSessions.has(ctx.from.id)) {
-      // Перевіряємо, чи це не для молитв
-      if (!(global.adminPrayerSessions && global.adminPrayerSessions.has(ctx.from.id))) {
-        return handleLiteratureReplyStart(ctx, msg);
-      }
-    }
-  }
-  if (msg === "💬 Остаточна відповідь") {
-    // Перевіряємо, чи це для молитв
-    if (global.adminPrayerSessions && global.adminPrayerSessions.has(ctx.from.id)) {
-      return handlePrayReplyStart(ctx, msg);
-    }
-    // Перевіряємо, чи це для літератури
-    if (global.adminLiteratureSessions && global.adminLiteratureSessions.has(ctx.from.id)) {
-      return handleLiteratureReplyStart(ctx, msg);
-    }
+  if (msg === "📚 Відповісти" || msg === "📚 Остаточна відповідь") {
+    return handleLiteratureReplyStart(ctx, msg);
   }
 
   // Обробка вибору уроку через reply keyboard

@@ -171,7 +171,7 @@ function createPrayerClarifyReplyMenu() {
  */
 function createAdminPrayerMenu() {
   return Markup.keyboard([
-    ["❓ Уточнити", "💬 Відповісти"]
+    ["🙏 Уточнити", "🙏 Відповісти"]
   ])
     .resize()
     .persistent();
@@ -182,7 +182,7 @@ function createAdminPrayerMenu() {
  */
 function createAdminPrayerClarifyReplyMenu() {
   return Markup.keyboard([
-    ["💬 Остаточна відповідь", "🏠 На головне меню"]
+    ["🙏 Остаточна відповідь", "🏠 На головне меню"]
   ])
     .resize()
     .persistent();
@@ -225,7 +225,7 @@ export async function handlePrayClarifyStart(ctx, msg = null) {
   let prayerId;
   
   // Якщо викликано через reply keyboard (msg містить текст кнопки)
-  if (msg && msg === "❓ Уточнити") {
+  if (msg && msg === "🙏 Уточнити") {
     // Отримуємо prayerId з сесії адміна
     if (global.adminPrayerSessions && global.adminPrayerSessions.has(ctx.from.id)) {
       prayerId = global.adminPrayerSessions.get(ctx.from.id);
@@ -413,7 +413,7 @@ export async function handlePrayReplyStart(ctx, msg = null) {
   let prayerId;
   
   // Якщо викликано через reply keyboard (msg містить текст кнопки)
-  if (msg && (msg === "💬 Відповісти" || msg === "💬 Остаточна відповідь")) {
+  if (msg && (msg === "🙏 Відповісти" || msg === "🙏 Остаточна відповідь")) {
     // Отримуємо prayerId з сесії адміна
     if (global.adminPrayerSessions && global.adminPrayerSessions.has(ctx.from.id)) {
       prayerId = global.adminPrayerSessions.get(ctx.from.id);
