@@ -4,84 +4,114 @@ import { Markup } from "telegraf";
 import { createMainMenu } from "./commands.js";
 
 /**
- * Обробник команди /lessons - показує тільки кнопки з уроками
+ * Створює меню з уроками (reply keyboard)
+ */
+function createLessonsMenu(lessons) {
+  const buttons = [];
+  // Групуємо по 2 уроки в рядок
+  for (let i = 0; i < lessons.length; i += 2) {
+    const row = [];
+    row.push(`${lessons[i].id}. ${lessons[i].title}`);
+    if (i + 1 < lessons.length) {
+      row.push(`${lessons[i + 1].id}. ${lessons[i + 1].title}`);
+    }
+    buttons.push(row);
+  }
+  // Додаємо кнопку повернення
+  buttons.push(["🏠 На головне меню"]);
+  
+  return Markup.keyboard(buttons)
+    .resize()
+    .persistent();
+}
+
+/**
+ * Обробник команди /lessons - показує reply keyboard меню з уроками
  */
 export async function handleLessons(ctx) {
   const lessons = await readLessons();
 
   if (lessons.length === 0) {
-    return ctx.reply("📭 Наразі немає доступних уроків.", createMainMenu());
+    const menu = await createMainMenu(ctx);
+    return ctx.reply("📭 Наразі немає доступних уроків.", menu);
   }
 
-  // Створюємо inline кнопки для вибору уроку (тільки кнопки, без тексту)
-  const buttons = [];
-  lessons.forEach((lesson) => {
-    // Показуємо номер і назву уроку
-    const buttonText = `${lesson.id}. ${lesson.title}`;
-    buttons.push([
-      Markup.button.callback(buttonText, `lesson_${lesson.id}`),
-    ]);
-  });
-
-  ctx.reply("📚 Оберіть урок:", Markup.inlineKeyboard(buttons));
+  // Створюємо reply keyboard меню з уроками
+  const menu = createLessonsMenu(lessons);
+  await ctx.reply("📚 Оберіть урок:", menu);
 }
 
 /**
- * Обробка вибору уроку через callback кнопку - надсилає тільки PDF
+ * Обробка вибору уроку через reply keyboard або callback кнопку
  */
-export async function handleLessonCallback(ctx) {
-  const lessonId = parseInt(ctx.match[1]);
-  const lesson = await findLessonById(lessonId);
-
-  if (!lesson) {
-    await ctx.answerCbQuery("⚠️ Урок не знайдено");
-    return;
-  }
-
-  // Перевіряємо, чи є PDF файл
-  if (!lesson.pdfFileId) {
-    await ctx.answerCbQuery("⚠️ PDF файл для цього уроку ще не завантажено");
-    return;
-  }
-
-  // Надсилаємо тільки PDF файл
-  try {
-    await ctx.answerCbQuery("📄 Надсилаю PDF файл...");
-    await ctx.replyWithDocument(lesson.pdfFileId);
-  } catch (err) {
-    console.error("Помилка надсилання PDF:", err);
-    await ctx.answerCbQuery("⚠️ Помилка надсилання PDF");
-    await ctx.reply("⚠️ Не вдалося надіслати PDF файл. Зверніться до адміністратора.");
-  }
-}
-
-/**
- * Обробка вибору конкретного уроку через текст (застарілий метод, але залишаємо для сумісності)
- */
-export async function handleLessonSelection(ctx, msg) {
-  const lessonId = parseInt(msg.trim());
-
-  if (isNaN(lessonId) || lessonId < 1) {
+export async function handleLessonSelection(ctx, msg = null) {
+  let lessonId;
+  
+  // Якщо викликано через reply keyboard (msg містить текст кнопки)
+  if (msg) {
+    // Виділяємо ID з тексту кнопки "1. Назва уроку"
+    const match = msg.match(/^(\d+)\./);
+    if (!match) {
+      return false;
+    }
+    lessonId = parseInt(match[1]);
+  } else if (ctx.match) {
+    // Якщо викликано через callback (inline кнопка - для сумісності)
+    lessonId = parseInt(ctx.match[1]);
+  } else {
     return false;
   }
-
+  
   const lesson = await findLessonById(lessonId);
 
   if (!lesson) {
-    ctx.reply("⚠️ Урок з таким номером не знайдено.");
+    if (msg) {
+      await ctx.reply("⚠️ Урок не знайдено");
+    } else {
+      await ctx.answerCbQuery("⚠️ Урок не знайдено");
+    }
     return true;
   }
 
   // Перевіряємо, чи є PDF файл
   if (!lesson.pdfFileId) {
-    ctx.reply("⚠️ PDF файл для цього уроку ще не завантажено");
+    if (msg) {
+      await ctx.reply("⚠️ PDF файл для цього уроку ще не завантажено");
+    } else {
+      await ctx.answerCbQuery("⚠️ PDF файл для цього уроку ще не завантажено");
+    }
     return true;
   }
 
-  // Надсилаємо тільки PDF файл
-  ctx.replyWithDocument(lesson.pdfFileId).catch(() => {
-    ctx.reply("⚠️ Не вдалося надіслати PDF файл. Зверніться до адміністратора.");
-  });
-
+  // Надсилаємо PDF файл
+  try {
+    if (!msg) {
+      await ctx.answerCbQuery("📄 Надсилаю PDF файл...");
+    }
+    await ctx.replyWithDocument(lesson.pdfFileId);
+    // Повертаємо меню з уроками
+    const lessons = await readLessons();
+    if (lessons.length > 0) {
+      const menu = createLessonsMenu(lessons);
+      await ctx.reply("📚 Оберіть інший урок або поверніться на головне меню:", menu);
+    }
+  } catch (err) {
+    console.error("Помилка надсилання PDF:", err);
+    if (msg) {
+      await ctx.reply("⚠️ Не вдалося надіслати PDF файл. Зверніться до адміністратора.");
+    } else {
+      await ctx.answerCbQuery("⚠️ Помилка надсилання PDF");
+      await ctx.reply("⚠️ Не вдалося надіслати PDF файл. Зверніться до адміністратора.");
+    }
+  }
+  
   return true;
 }
+
+/**
+ * Обробка вибору уроку через callback кнопку (для сумісності)
+ */
+export async function handleLessonCallback(ctx) {
+  return handleLessonSelection(ctx);
+}
+

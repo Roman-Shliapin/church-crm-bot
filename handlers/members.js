@@ -63,9 +63,10 @@ export async function handleMembersShowExcel(ctx) {
  */
 export async function handleMe(ctx) {
   const member = await findMemberById(ctx.from.id);
+  const menu = await createMainMenu(ctx);
 
   if (!member) {
-    await ctx.reply("Вибачте, ви ще не зареєстровані ❌", createMainMenu());
+    await ctx.reply("Вибачте, ви ще не зареєстровані ❌", menu);
   } else {
     const message =
       `👤 *Ваш профіль*\n\n` +
@@ -73,7 +74,7 @@ export async function handleMe(ctx) {
       `📅 Хрещення: ${member.baptism || (member.baptized === false ? "Ще не хрещений" : "не вказано")}\n` +
       `🎂 День народження: ${member.birthday || "не вказано"}\n` +
       `📞 Телефон: ${member.phone}`;
-    await ctx.replyWithMarkdown(message, createMainMenu());
+    await ctx.replyWithMarkdown(message, menu);
   }
 }
 

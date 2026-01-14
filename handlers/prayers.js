@@ -1,6 +1,7 @@
 // Обробник молитвенних потреб
 import { Markup } from "telegraf";
-import { readPrayers, addPrayer, findMemberById, findPrayerById } from "../services/storage.js";
+import { readPrayers, addPrayer, findMemberById, findPrayerById, updatePrayerClarification } from "../services/storage.js";
+import { getCollection } from "../services/database.js";
 import { createMainMenu } from "./commands.js";
 import { formatPrayerMessage, createPrayer, createAdminPrayerNotification } from "../utils/helpers.js";
 import { ADMIN_IDS } from "../config/constants.js";
@@ -17,15 +18,17 @@ export async function handlePrayStart(ctx) {
   if (member) {
     // Член церкви - можна додати ім'я або залишити анонімно
     ctx.session = { step: "pray_anonymous", data: { name: member.name } };
+    const menu = await createMainMenu(ctx);
     return ctx.reply(
       "🙏 Дякуємо за вашу молитвенну потребу!\n\n" +
       "Хочете додати ваше ім'я? (напишіть 'так' або 'ні', або просто введіть опис потребі)",
-      createMainMenu()
+      menu
     );
   } else {
     // Гість - анонімно
     ctx.session = { step: "pray_description", data: { name: null } };
-    return ctx.reply("🙏 Опишіть, будь ласка, молитвенну потребу:", createMainMenu());
+    const menu = await createMainMenu(ctx);
+    return ctx.reply("🙏 Опишіть, будь ласка, молитвенну потребу:", menu);
   }
 }
 
@@ -118,7 +121,8 @@ export async function handlePraySteps(ctx, msg) {
         description: sanitizedDescription,
       });
       await addPrayer(prayer);
-      await ctx.reply("✅ Дякуємо! Ваша молитвенна потреба збережена 🙏", createMainMenu());
+      const menu = await createMainMenu(ctx);
+      await ctx.reply("✅ Дякуємо! Ваша молитвенна потреба збережена 🙏", menu);
       // Повідомлення адмінам
       await notifyAdmins(ctx, prayer);
       ctx.session = null;
@@ -140,7 +144,8 @@ export async function handlePraySteps(ctx, msg) {
     });
 
     await addPrayer(prayer);
-    await ctx.reply("✅ Дякуємо! Ваша молитвенна потреба збережена 🙏", createMainMenu());
+    const menu = await createMainMenu(ctx);
+    await ctx.reply("✅ Дякуємо! Ваша молитвенна потреба збережена 🙏", menu);
     // Повідомлення адмінам
     await notifyAdmins(ctx, prayer);
     ctx.session = null;
@@ -151,24 +156,62 @@ export async function handlePraySteps(ctx, msg) {
 }
 
 /**
+ * Створює меню для відповіді на уточнення користувача
+ */
+function createPrayerClarifyReplyMenu() {
+  return Markup.keyboard([
+    ["✍️ Написати уточнення"]
+  ])
+    .resize()
+    .persistent();
+}
+
+/**
+ * Створює меню для адміна при отриманні молитвенної потреби (без ID в тексті)
+ */
+function createAdminPrayerMenu() {
+  return Markup.keyboard([
+    ["❓ Уточнити", "💬 Відповісти"]
+  ])
+    .resize()
+    .persistent();
+}
+
+/**
+ * Створює меню для адміна після отримання уточнення від користувача
+ */
+function createAdminPrayerClarifyReplyMenu() {
+  return Markup.keyboard([
+    ["💬 Остаточна відповідь", "🏠 На головне меню"]
+  ])
+    .resize()
+    .persistent();
+}
+
+/**
  * Надсилає повідомлення адмінам про нову молитвенну потребу
  */
 async function notifyAdmins(ctx, prayer) {
   const adminMessage = createAdminPrayerNotification(prayer);
   console.log("🟢 Надсилаю повідомлення адмінам про молитву:", ADMIN_IDS);
 
-  const replyKeyboard = Markup.inlineKeyboard([
-    [
-      Markup.button.callback("❓ Уточнити", `clarify_prayer_${prayer.id}`)
-    ]
-  ]);
+  // Використовуємо reply keyboard меню замість inline кнопок
+  const replyKeyboard = createAdminPrayerMenu();
 
   for (const adminId of ADMIN_IDS) {
     try {
+      // Відправляємо повідомлення адміну
       await ctx.telegram.sendMessage(adminId, adminMessage, {
         parse_mode: "Markdown",
         reply_markup: replyKeyboard.reply_markup,
       });
+      
+      // Зберігаємо prayerId в сесії адміна через окреме повідомлення (використовуємо bot instance)
+      // Або зберігаємо в глобальному об'єкті сесій
+      if (!global.adminPrayerSessions) {
+        global.adminPrayerSessions = new Map();
+      }
+      global.adminPrayerSessions.set(adminId, prayer.id);
     } catch (err) {
       console.error("❌ Помилка надсилання адміну:", err);
     }
@@ -176,14 +219,37 @@ async function notifyAdmins(ctx, prayer) {
 }
 
 /**
- * Обробник кнопки "Уточнити" на молитвенну потребу
+ * Обробник кнопки "Уточнити" на молитвенну потребу (через reply keyboard)
  */
-export async function handlePrayClarifyStart(ctx) {
-  const prayerId = parseInt(ctx.match[1]);
+export async function handlePrayClarifyStart(ctx, msg = null) {
+  let prayerId;
+  
+  // Якщо викликано через reply keyboard (msg містить текст кнопки)
+  if (msg && msg === "❓ Уточнити") {
+    // Отримуємо prayerId з сесії адміна
+    if (global.adminPrayerSessions && global.adminPrayerSessions.has(ctx.from.id)) {
+      prayerId = global.adminPrayerSessions.get(ctx.from.id);
+    } else {
+      await ctx.reply("⚠️ Не знайдено активної молитвенної потреби. Очікуйте нове повідомлення.");
+      return;
+    }
+  } else if (ctx.match) {
+    // Якщо викликано через callback (inline кнопка - для сумісності)
+    prayerId = parseInt(ctx.match[1]);
+  } else {
+    await ctx.reply("⚠️ Помилка обробки запиту.");
+    return;
+  }
+  
   const prayer = await findPrayerById(prayerId);
 
   if (!prayer) {
-    return ctx.answerCbQuery("⚠️ Молитвенна потреба не знайдена");
+    if (msg) {
+      await ctx.reply("⚠️ Молитвенна потреба не знайдена");
+    } else {
+      await ctx.answerCbQuery("⚠️ Молитвенна потреба не знайдена");
+    }
+    return;
   }
 
   // Зберігаємо в сесії, що адмін хоче уточнити цю молитву
@@ -192,7 +258,6 @@ export async function handlePrayClarifyStart(ctx) {
     data: { prayerId, userId: prayer.userId, adminId: ctx.from.id }
   };
 
-  await ctx.answerCbQuery("✍️ Введіть питання для уточнення:");
   await ctx.reply(
     `✍️ Введіть питання для уточнення до ${prayer.name || "користувача"}:\n\n` +
     `(Ви можете використати до 4000 символів)`
@@ -224,15 +289,15 @@ export async function handlePrayClarifyText(ctx, msg) {
       return true;
     }
 
-    // Відправляємо питання користувачу з кнопкою для відповіді
-    const userMessage = `❓ *Уточнення до вашої молитвенної потреби:*\n\n${sanitizedText}\n\n_Натисніть кнопку нижче, щоб відповісти:_`;
+    // Зберігаємо в базі даних, що користувач має відповісти на уточнення
+    // Оновлюємо prayer, додаючи інформацію про уточнення
+    await updatePrayerClarification(prayerId, adminId, sanitizedText);
+    
+    // Відправляємо питання користувачу з reply keyboard для відповіді (без inline кнопок)
+    const userMessage = `❓ *Уточнення до вашої молитвенної потреби:*\n\n${sanitizedText}\n\n_Натисніть кнопку нижче, щоб написати уточнення:_`;
     await ctx.telegram.sendMessage(userId, userMessage, {
       parse_mode: "Markdown",
-      reply_markup: Markup.inlineKeyboard([
-        [
-          Markup.button.callback("💬 Відповісти", `reply_clarify_prayer_${prayerId}_${adminId}`)
-        ]
-      ]).reply_markup,
+      reply_markup: createPrayerClarifyReplyMenu().reply_markup,
     });
 
     await ctx.reply("✅ Питання надіслано користувачу! Очікуємо відповіді.");
@@ -247,27 +312,39 @@ export async function handlePrayClarifyText(ctx, msg) {
 }
 
 /**
- * Обробник кнопки "Відповісти" від користувача на уточнення
+ * Обробник кнопки "Написати уточнення" від користувача (через reply keyboard)
  */
 export async function handlePrayClarifyReplyStart(ctx) {
-  const prayerId = parseInt(ctx.match[1]);
-  const adminId = parseInt(ctx.match[2]);
-  const prayer = await findPrayerById(prayerId);
-
-  if (!prayer) {
-    return ctx.answerCbQuery("⚠️ Молитвенна потреба не знайдена");
+  // Перевіряємо, чи є активне уточнення для цього користувача
+  // Шукаємо останню молитву користувача, яка має уточнення
+  const prayers = await readPrayers();
+  const userPrayers = prayers
+    .filter(p => p.userId === ctx.from.id && p.needsClarificationReply === true)
+    .sort((a, b) => b.id - a.id);
+  
+  if (userPrayers.length === 0) {
+    const menu = await createMainMenu(ctx);
+    return ctx.reply("⚠️ Не знайдено активних уточнень для відповіді.", menu);
   }
 
+  // Беремо останню молитву з уточненням
+  const prayer = userPrayers[0];
+  
   // Зберігаємо в сесії, що користувач хоче відповісти на уточнення
   ctx.session = {
     step: "pray_clarify_reply_text",
-    data: { prayerId, adminId }
+    data: { 
+      prayerId: prayer.id,
+      adminId: prayer.clarifyingAdminId
+    }
   };
 
-  await ctx.answerCbQuery("✍️ Введіть вашу відповідь:");
+  // Показуємо reply keyboard меню для введення уточнення
+  const menu = createPrayerClarifyReplyMenu();
   await ctx.reply(
-    `✍️ Введіть вашу відповідь на питання:\n\n` +
-    `(Ви можете використати до 4000 символів)`
+    `✍️ Введіть ваше уточнення:\n\n` +
+    `(Ви можете використати до 4000 символів)`,
+    menu
   );
 }
 
@@ -296,18 +373,29 @@ export async function handlePrayClarifyReplyText(ctx, msg) {
       return true;
     }
 
-    // Відправляємо відповідь адміну з кнопкою для фінальної відповіді
+    // Оновлюємо prayer - уточнення отримано
+    const collection = await getCollection("prayers");
+    await collection.findOneAndUpdate(
+      { id: prayerId },
+      { $set: { needsClarificationReply: false, clarificationReply: sanitizedText } }
+    );
+
+    // Оновлюємо сесію адміна з новим prayerId
+    if (!global.adminPrayerSessions) {
+      global.adminPrayerSessions = new Map();
+    }
+    global.adminPrayerSessions.set(adminId, prayerId);
+    
+    // Відправляємо відповідь адміну з меню "Остаточна відповідь" або "На головне меню"
     const adminMessage = `💬 *Відповідь на уточнення:*\n\n${sanitizedText}\n\n_Від: ${prayer.name || "користувача"}_`;
+    const adminMenu = createAdminPrayerClarifyReplyMenu();
     await ctx.telegram.sendMessage(adminId, adminMessage, {
       parse_mode: "Markdown",
-      reply_markup: Markup.inlineKeyboard([
-        [
-          Markup.button.callback("💬 Відповісти", `final_reply_prayer_${prayerId}_${ctx.from.id}`)
-        ]
-      ]).reply_markup,
+      reply_markup: adminMenu.reply_markup,
     });
 
-    await ctx.reply("✅ Ваша відповідь надіслана! 🙏", createMainMenu());
+    const menu = await createMainMenu(ctx);
+    await ctx.reply("✅ Ваша відповідь надіслана! 🙏", menu);
     ctx.session = null;
   } catch (err) {
     console.error("Помилка надсилання відповіді:", err);
@@ -319,27 +407,49 @@ export async function handlePrayClarifyReplyText(ctx, msg) {
 }
 
 /**
- * Обробник кнопки "Відповісти" від адміна на отриману відповідь
+ * Обробник кнопки "Відповісти" на молитвенну потребу (через reply keyboard)
  */
-export async function handlePrayReplyStart(ctx) {
-  const prayerId = parseInt(ctx.match[1]);
-  const userId = parseInt(ctx.match[2]);
+export async function handlePrayReplyStart(ctx, msg = null) {
+  let prayerId;
+  
+  // Якщо викликано через reply keyboard (msg містить текст кнопки)
+  if (msg && (msg === "💬 Відповісти" || msg === "💬 Остаточна відповідь")) {
+    // Отримуємо prayerId з сесії адміна
+    if (global.adminPrayerSessions && global.adminPrayerSessions.has(ctx.from.id)) {
+      prayerId = global.adminPrayerSessions.get(ctx.from.id);
+    } else {
+      await ctx.reply("⚠️ Не знайдено активної молитвенної потреби. Очікуйте нове повідомлення.");
+      return;
+    }
+  } else if (ctx.match) {
+    // Якщо викликано через callback (inline кнопка - для сумісності)
+    prayerId = parseInt(ctx.match[1]);
+  } else {
+    await ctx.reply("⚠️ Помилка обробки запиту.");
+    return;
+  }
+  
   const prayer = await findPrayerById(prayerId);
 
   if (!prayer) {
-    return ctx.answerCbQuery("⚠️ Молитвенна потреба не знайдена");
+    if (msg) {
+      await ctx.reply("⚠️ Молитвенна потреба не знайдена");
+    } else {
+      await ctx.answerCbQuery("⚠️ Молитвенна потреба не знайдена");
+    }
+    return;
   }
 
-  // Зберігаємо в сесії, що адмін хоче відповісти
+  // Зберігаємо в сесії, що адмін хоче відповісти (остаточна відповідь)
   ctx.session = {
     step: "pray_reply_text",
-    data: { prayerId, userId }
+    data: { prayerId, userId: prayer.userId }
   };
 
-  await ctx.answerCbQuery("✍️ Введіть текст відповіді:");
   await ctx.reply(
-    `✍️ Введіть текст відповіді для ${prayer.name || "користувача"}:\n\n` +
-    `(Ви можете використати до 4000 символів)`
+    `✍️ Введіть текст остаточної відповіді для ${prayer.name || "користувача"}:\n\n` +
+    `(Ви можете використати до 4000 символів)\n\n` +
+    `⚠️ Це остаточна відповідь - користувач не зможе відповісти.`
   );
 }
 
@@ -361,13 +471,30 @@ export async function handlePrayReplyText(ctx, msg) {
   }
 
   try {
-    // Відправляємо повідомлення користувачу
+    // Оновлюємо prayer - відповідь надіслано
+    const collection = await getCollection("prayers");
+    await collection.findOneAndUpdate(
+      { id: prayerId },
+      { $set: { needsClarificationReply: false, finalReply: sanitizedText } }
+    );
+
+    // Очищаємо сесію адміна для цієї молитви
+    if (global.adminPrayerSessions) {
+      global.adminPrayerSessions.delete(ctx.from.id);
+    }
+
+    // Відправляємо повідомлення користувачу (остаточна відповідь, без можливості відповісти)
+    // Повертаємо головне меню користувачу
     const userMessage = `📬 *Відповідь на вашу молитвенну потребу:*\n\n${sanitizedText}`;
+    const userMenu = await createMainMenu({ from: { id: userId } });
     await ctx.telegram.sendMessage(userId, userMessage, {
       parse_mode: "Markdown",
+      reply_markup: userMenu.reply_markup,
     });
 
-    await ctx.reply("✅ Відповідь успішно надіслана!");
+    // Повертаємо головне меню адміну
+    const menu = await createMainMenu(ctx);
+    await ctx.reply("✅ Остаточна відповідь успішно надіслана!", menu);
     ctx.session = null;
   } catch (err) {
     console.error("Помилка надсилання відповіді:", err);

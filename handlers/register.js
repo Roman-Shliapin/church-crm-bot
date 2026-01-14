@@ -7,12 +7,13 @@ import { createMainMenu } from "./commands.js";
 /**
  * Початок процесу реєстрації
  */
-export function handleRegisterStart(ctx) {
+export async function handleRegisterStart(ctx) {
+  const menu = await createMainMenu(ctx);
   if (ctx.session?.step) {
-    return ctx.reply("Ви вже проходите реєстрацію. Будь ласка, завершіть її.", createMainMenu());
+    return ctx.reply("Ви вже проходите реєстрацію. Будь ласка, завершіть її.", menu);
   }
   ctx.session = { step: 1, data: {} };
-  ctx.reply("🟢 Давай скоріш починати!", createMainMenu());
+  ctx.reply("🟢 Давай скоріш починати!", menu);
   ctx.reply("Введіть, будь ласка, ваше повне ім'я та прізвище:");
 }
 
@@ -117,13 +118,15 @@ export async function handleRegisterSteps(ctx, msg) {
 
     try {
       await addMember(user);
+      const menu = await createMainMenu(ctx);
       const successMessage = user.baptized 
         ? `✅ Дякуємо, ${user.name}! Ви успішно зареєстровані як член церкви.`
         : `✅ Дякуємо, ${user.name}! Ви успішно зареєстровані. Ми молимося за вас! 🙏`;
-      ctx.reply(successMessage, createMainMenu());
+      ctx.reply(successMessage, menu);
       ctx.session = null;
     } catch (err) {
-      ctx.reply(`⚠️ Помилка реєстрації: ${err.message}`, createMainMenu());
+      const menu = await createMainMenu(ctx);
+      ctx.reply(`⚠️ Помилка реєстрації: ${err.message}`, menu);
       ctx.session = null;
     }
     return true;

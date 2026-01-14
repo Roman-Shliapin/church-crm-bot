@@ -1,6 +1,7 @@
 // Обробник запитів на літературу
 import { Markup } from "telegraf";
-import { addLiteratureRequest, findLiteratureRequestById, findMemberById } from "../services/storage.js";
+import { addLiteratureRequest, findLiteratureRequestById, findMemberById, readLiteratureRequests } from "../services/storage.js";
+import { getCollection } from "../services/database.js";
 import { createMainMenu } from "./commands.js";
 import { createLiteratureRequest, createAdminLiteratureNotification } from "../utils/helpers.js";
 import { ADMIN_IDS } from "../config/constants.js";
@@ -26,10 +27,11 @@ export async function handleLiteratureStart(ctx) {
   }
   
   ctx.session = { step: "literature_request", data: { name: userName } };
+  const menu = await createMainMenu(ctx);
   return ctx.reply(
     "📚 Яку літературу ви шукаєте?\n\n" +
     "Опишіть, будь ласка, ваш запит (наприклад: 'створення церкви', 'біблійні коментарі', тощо):",
-    createMainMenu()
+    menu
   );
 }
 
@@ -58,18 +60,41 @@ export async function handleLiteratureRequest(ctx, msg) {
     await addLiteratureRequest(literatureRequest);
     await ctx.reply(
       "✅ Ваш запит надіслано! Почекайте, будь ласка, наші брати вам допоможуть 🙏",
-      createMainMenu()
+      await createMainMenu(ctx)
     );
     // Повідомлення адмінам
     await notifyAdmins(ctx, literatureRequest);
     ctx.session = null;
   } catch (err) {
     console.error("Помилка збереження запиту на літературу:", err);
-    await ctx.reply("⚠️ Помилка збереження запиту. Спробуйте, будь ласка, пізніше.", createMainMenu());
+    const menu = await createMainMenu(ctx);
+    await ctx.reply("⚠️ Помилка збереження запиту. Спробуйте, будь ласка, пізніше.", menu);
     ctx.session = null;
   }
 
   return true;
+}
+
+/**
+ * Створює меню для адміна при отриманні запиту на літературу (без ID в тексті)
+ */
+function createAdminLiteratureMenu() {
+  return Markup.keyboard([
+    ["❓ Уточнити", "💬 Відповісти"]
+  ])
+    .resize()
+    .persistent();
+}
+
+/**
+ * Створює меню для адміна після отримання уточнення від користувача
+ */
+function createAdminLiteratureClarifyReplyMenu() {
+  return Markup.keyboard([
+    ["💬 Остаточна відповідь", "🏠 На головне меню"]
+  ])
+    .resize()
+    .persistent();
 }
 
 /**
@@ -79,19 +104,22 @@ async function notifyAdmins(ctx, literatureRequest) {
   const adminMessage = createAdminLiteratureNotification(literatureRequest);
   console.log("🟢 Надсилаю повідомлення адмінам про запит на літературу:", ADMIN_IDS);
 
-  const replyKeyboard = Markup.inlineKeyboard([
-    [
-      Markup.button.callback("❓ Уточнити", `clarify_literature_${literatureRequest.id}`),
-      Markup.button.callback("💬 Відповісти", `reply_literature_${literatureRequest.id}`)
-    ]
-  ]);
+  // Використовуємо reply keyboard меню замість inline кнопок
+  const replyKeyboard = createAdminLiteratureMenu();
 
   for (const adminId of ADMIN_IDS) {
     try {
+      // Відправляємо повідомлення адміну
       await ctx.telegram.sendMessage(adminId, adminMessage, {
         parse_mode: "Markdown",
         reply_markup: replyKeyboard.reply_markup,
       });
+      
+      // Зберігаємо literatureRequestId в сесії адміна
+      if (!global.adminLiteratureSessions) {
+        global.adminLiteratureSessions = new Map();
+      }
+      global.adminLiteratureSessions.set(adminId, literatureRequest.id);
     } catch (err) {
       console.error("❌ Помилка надсилання адміну:", err);
     }
@@ -99,14 +127,48 @@ async function notifyAdmins(ctx, literatureRequest) {
 }
 
 /**
- * Обробник кнопки "Уточнити" на запит літератури
+ * Створює меню для відповіді на уточнення користувача (література)
  */
-export async function handleLiteratureClarifyStart(ctx) {
-  const requestId = parseInt(ctx.match[1]);
+function createLiteratureClarifyReplyMenu() {
+  return Markup.keyboard([
+    ["✍️ Написати уточнення"]
+  ])
+    .resize()
+    .persistent();
+}
+
+/**
+ * Обробник кнопки "Уточнити" на запит літератури (через reply keyboard)
+ */
+export async function handleLiteratureClarifyStart(ctx, msg = null) {
+  let requestId;
+  
+  // Якщо викликано через reply keyboard (msg містить текст кнопки)
+  if (msg && msg === "❓ Уточнити") {
+    // Отримуємо requestId з сесії адміна
+    if (global.adminLiteratureSessions && global.adminLiteratureSessions.has(ctx.from.id)) {
+      requestId = global.adminLiteratureSessions.get(ctx.from.id);
+    } else {
+      await ctx.reply("⚠️ Не знайдено активного запиту. Очікуйте нове повідомлення.");
+      return;
+    }
+  } else if (ctx.match) {
+    // Якщо викликано через callback (inline кнопка - для сумісності)
+    requestId = parseInt(ctx.match[1]);
+  } else {
+    await ctx.reply("⚠️ Помилка обробки запиту.");
+    return;
+  }
+  
   const request = await findLiteratureRequestById(requestId);
 
   if (!request) {
-    return ctx.answerCbQuery("⚠️ Запит не знайдений");
+    if (msg) {
+      await ctx.reply("⚠️ Запит не знайдений");
+    } else {
+      await ctx.answerCbQuery("⚠️ Запит не знайдений");
+    }
+    return;
   }
 
   // Зберігаємо в сесії, що адмін хоче уточнити цей запит
@@ -115,7 +177,6 @@ export async function handleLiteratureClarifyStart(ctx) {
     data: { requestId, userId: request.userId, adminId: ctx.from.id }
   };
 
-  await ctx.answerCbQuery("✍️ Введіть питання для уточнення:");
   await ctx.reply(
     `✍️ Введіть питання для уточнення до запиту:\n\n` +
     `"${request.request}"\n\n` +
@@ -148,15 +209,22 @@ export async function handleLiteratureClarifyText(ctx, msg) {
       return true;
     }
 
-    // Відправляємо питання користувачу з кнопкою для відповіді
-    const userMessage = `❓ *Уточнення до вашого запиту на літературу:*\n\n${sanitizedText}\n\n_Натисніть кнопку нижче, щоб відповісти:_`;
+    // Зберігаємо в базі даних, що користувач має відповісти на уточнення
+    const collection = await getCollection("literature_requests");
+    await collection.findOneAndUpdate(
+      { id: requestId },
+      { $set: { 
+        clarifyingAdminId: adminId,
+        clarificationText: sanitizedText,
+        needsClarificationReply: true
+      } }
+    );
+    
+    // Відправляємо питання користувачу з reply keyboard для відповіді
+    const userMessage = `❓ *Уточнення до вашого запиту на літературу:*\n\n${sanitizedText}\n\n_Натисніть кнопку нижче, щоб написати уточнення:_`;
     await ctx.telegram.sendMessage(userId, userMessage, {
       parse_mode: "Markdown",
-      reply_markup: Markup.inlineKeyboard([
-        [
-          Markup.button.callback("💬 Відповісти", `reply_clarify_literature_${requestId}_${adminId}`)
-        ]
-      ]).reply_markup,
+      reply_markup: createLiteratureClarifyReplyMenu().reply_markup,
     });
 
     await ctx.reply("✅ Питання надіслано користувачу! Очікуємо відповіді.");
@@ -171,27 +239,37 @@ export async function handleLiteratureClarifyText(ctx, msg) {
 }
 
 /**
- * Обробник кнопки "Відповісти" від користувача на уточнення
+ * Обробник кнопки "Написати уточнення" від користувача (через reply keyboard)
  */
 export async function handleLiteratureClarifyReplyStart(ctx) {
-  const requestId = parseInt(ctx.match[1]);
-  const adminId = parseInt(ctx.match[2]);
-  const request = await findLiteratureRequestById(requestId);
-
-  if (!request) {
-    return ctx.answerCbQuery("⚠️ Запит не знайдений");
+  // Перевіряємо, чи є активне уточнення для цього користувача
+  const requests = await readLiteratureRequests();
+  const userRequests = requests
+    .filter(r => r.userId === ctx.from.id && r.needsClarificationReply === true)
+    .sort((a, b) => b.id - a.id);
+  
+  if (userRequests.length === 0) {
+    const menu = await createMainMenu(ctx);
+    return ctx.reply("⚠️ Не знайдено активних уточнень для відповіді.", menu);
   }
 
+  // Беремо останній запит з уточненням
+  const request = userRequests[0];
+  
   // Зберігаємо в сесії, що користувач хоче відповісти на уточнення
   ctx.session = {
     step: "literature_clarify_reply_text",
-    data: { requestId, adminId }
+    data: { 
+      requestId: request.id,
+      adminId: request.clarifyingAdminId
+    }
   };
 
-  await ctx.answerCbQuery("✍️ Введіть вашу відповідь:");
+  const menu = createLiteratureClarifyReplyMenu();
   await ctx.reply(
-    `✍️ Введіть вашу відповідь на питання:\n\n` +
-    `(Ви можете використати до 4000 символів)`
+    `✍️ Введіть ваше уточнення:\n\n` +
+    `(Ви можете використати до 4000 символів)`,
+    menu
   );
 }
 
@@ -220,18 +298,29 @@ export async function handleLiteratureClarifyReplyText(ctx, msg) {
       return true;
     }
 
-    // Відправляємо відповідь адміну з кнопкою для фінальної відповіді
+    // Оновлюємо запит - уточнення отримано
+    const collection = await getCollection("literature_requests");
+    await collection.findOneAndUpdate(
+      { id: requestId },
+      { $set: { needsClarificationReply: false, clarificationReply: sanitizedText } }
+    );
+    
+    // Оновлюємо сесію адміна з новим requestId
+    if (!global.adminLiteratureSessions) {
+      global.adminLiteratureSessions = new Map();
+    }
+    global.adminLiteratureSessions.set(adminId, requestId);
+    
+    // Відправляємо відповідь адміну з меню "Остаточна відповідь" або "На головне меню"
     const adminMessage = `💬 *Відповідь на уточнення:*\n\n${sanitizedText}\n\n_Запит: ${request.request}_`;
+    const adminMenu = createAdminLiteratureClarifyReplyMenu();
     await ctx.telegram.sendMessage(adminId, adminMessage, {
       parse_mode: "Markdown",
-      reply_markup: Markup.inlineKeyboard([
-        [
-          Markup.button.callback("💬 Відповісти", `final_reply_literature_${requestId}_${ctx.from.id}`)
-        ]
-      ]).reply_markup,
+      reply_markup: adminMenu.reply_markup,
     });
 
-    await ctx.reply("✅ Ваша відповідь надіслана! 🙏", createMainMenu());
+    const menu = await createMainMenu(ctx);
+    await ctx.reply("✅ Ваша відповідь надіслана! 🙏", menu);
     ctx.session = null;
   } catch (err) {
     console.error("Помилка надсилання відповіді:", err);
@@ -243,14 +332,37 @@ export async function handleLiteratureClarifyReplyText(ctx, msg) {
 }
 
 /**
- * Обробник кнопки "Відповісти" від адміна на запит літератури
+ * Обробник кнопки "Відповісти" на запит літератури (через reply keyboard)
  */
-export async function handleLiteratureReplyStart(ctx) {
-  const requestId = parseInt(ctx.match[1]);
+export async function handleLiteratureReplyStart(ctx, msg = null) {
+  let requestId;
+  
+  // Якщо викликано через reply keyboard (msg містить текст кнопки)
+  if (msg && (msg === "💬 Відповісти" || msg === "💬 Остаточна відповідь")) {
+    // Отримуємо requestId з сесії адміна
+    if (global.adminLiteratureSessions && global.adminLiteratureSessions.has(ctx.from.id)) {
+      requestId = global.adminLiteratureSessions.get(ctx.from.id);
+    } else {
+      await ctx.reply("⚠️ Не знайдено активного запиту. Очікуйте нове повідомлення.");
+      return;
+    }
+  } else if (ctx.match) {
+    // Якщо викликано через callback (inline кнопка - для сумісності)
+    requestId = parseInt(ctx.match[1]);
+  } else {
+    await ctx.reply("⚠️ Помилка обробки запиту.");
+    return;
+  }
+  
   const request = await findLiteratureRequestById(requestId);
 
   if (!request) {
-    return ctx.answerCbQuery("⚠️ Запит не знайдений");
+    if (msg) {
+      await ctx.reply("⚠️ Запит не знайдений");
+    } else {
+      await ctx.answerCbQuery("⚠️ Запит не знайдений");
+    }
+    return;
   }
 
   // Зберігаємо в сесії, що адмін хоче відповісти
@@ -259,7 +371,6 @@ export async function handleLiteratureReplyStart(ctx) {
     data: { requestId, userId: request.userId }
   };
 
-  await ctx.answerCbQuery("✍️ Введіть текст відповіді або надішліть файл:");
   await ctx.reply(
     `✍️ Введіть текст відповіді для запиту:\n\n` +
     `"${request.request}"\n\n` +
@@ -291,7 +402,14 @@ export async function handleLiteratureReplyText(ctx, msg) {
       parse_mode: "Markdown",
     });
 
-    await ctx.reply("✅ Відповідь успішно надіслана!");
+    // Очищаємо сесію адміна для цього запиту
+    if (global.adminLiteratureSessions) {
+      global.adminLiteratureSessions.delete(ctx.from.id);
+    }
+
+    // Повертаємо головне меню адміну
+    const menu = await createMainMenu(ctx);
+    await ctx.reply("✅ Відповідь успішно надіслана!", menu);
     ctx.session = null;
   } catch (err) {
     console.error("Помилка надсилання відповіді:", err);

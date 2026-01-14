@@ -370,6 +370,32 @@ export async function findPrayerById(prayerId) {
   }
 }
 
+/**
+ * Оновлює молитву, додаючи інформацію про уточнення
+ * @param {number} prayerId - ID молитви
+ * @param {number} adminId - ID адміна, який уточнює
+ * @param {string} clarificationText - Текст уточнення
+ */
+export async function updatePrayerClarification(prayerId, adminId, clarificationText) {
+  try {
+    const collection = await getCollection(COLLECTIONS.PRAYERS);
+    await collection.findOneAndUpdate(
+      { id: parseInt(prayerId) },
+      { 
+        $set: { 
+          clarifyingAdminId: adminId,
+          clarificationText: clarificationText,
+          needsClarificationReply: true
+        } 
+      }
+    );
+    logSuccess("Prayer clarification updated", { prayerId, adminId });
+  } catch (err) {
+    logError("Помилка оновлення clarification в MongoDB", err);
+    throw err;
+  }
+}
+
 // ==================== БІБЛІЙНІ УРОКИ ====================
 
 /**
@@ -440,6 +466,21 @@ export async function addLiteratureRequest(request) {
   } catch (err) {
     logError("Помилка додавання literature request в MongoDB", err);
     throw err;
+  }
+}
+
+/**
+ * Читає всі запити на літературу з MongoDB
+ * @returns {Promise<Array>} Масив запитів
+ */
+export async function readLiteratureRequests() {
+  try {
+    const collection = await getCollection(COLLECTIONS.LITERATURE_REQUESTS);
+    const requests = await collection.find({}).toArray();
+    return requests.map(({ _id, ...request }) => request);
+  } catch (err) {
+    logError("Помилка читання literature requests з MongoDB", err);
+    return [];
   }
 }
 

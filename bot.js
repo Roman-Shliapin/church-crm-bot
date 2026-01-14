@@ -6,15 +6,16 @@ import dotenv from "dotenv";
 dotenv.config();
 
 // Імпорт обробників команд
-import { handleStart, handleHelp, createMainMenu } from "./handlers/commands.js";
+import { handleStart, handleHelp, createMainMenu, handleBibleSupport } from "./handlers/commands.js";
 import { handleRegisterStart, handleRegisterSteps, handleRegisterBaptismStatus } from "./handlers/register.js";
 import { handleMe, handleMembers, handleMembersShowChat, handleMembersShowExcel } from "./handlers/members.js";
 import { handleCandidates, handleCandidatesShowChat, handleCandidatesShowExcel } from "./handlers/candidates.js";
 import { handleNeedStart, handleNeedTypeSelection, handleNeedSteps, handleNeedsList, handleNeedsShowChat, handleNeedsShowExcel, handleNeedStatusChange, handleNeedReplyStart, handleNeedReplyText } from "./handlers/needs.js";
 import { handlePrayStart, handlePraySteps, handlePrayersList, handlePrayersShowChat, handlePrayersShowExcel, handlePrayClarifyStart, handlePrayClarifyText, handlePrayClarifyReplyStart, handlePrayClarifyReplyText, handlePrayReplyStart, handlePrayReplyText } from "./handlers/prayers.js";
+import { readPrayers, readLiteratureRequests } from "./services/storage.js";
 import { handleLessons, handleLessonSelection, handleLessonCallback } from "./handlers/lessons.js";
 import { handleUploadLessonStart, handleUploadLessonName, handleUploadLessonFile } from "./handlers/lessonsAdmin.js";
-import { handleContact } from "./handlers/contact.js";
+import { handleContact, handleChurchChat, handleBackToMainMenu } from "./handlers/contact.js";
 import { handleAnnounceStart, handleAnnounceAudience, handleAnnounceText } from "./handlers/announce.js";
 import { handleLiteratureStart, handleLiteratureRequest, handleLiteratureClarifyStart, handleLiteratureClarifyText, handleLiteratureClarifyReplyStart, handleLiteratureClarifyReplyText, handleLiteratureReplyStart, handleLiteratureFinalReplyStart, handleLiteratureReplyText, handleLiteratureReplyDocument } from "./handlers/literature.js";
 
@@ -114,9 +115,14 @@ bot.on("text", async (ctx, next) => {
   if (msg === "👤 Мій профіль") {
     return handleMe(ctx);
   }
-  if (msg === "🙏 Подати заявку") {
+  if (msg === "🙏 Попросити допомогу") {
     return handleNeedStart(ctx);
   }
+  if (msg === "📖 Біблія та духовна підтримка") {
+    return handleBibleSupport(ctx);
+  }
+  
+  // Обробка кнопок з меню "Біблія та духовна підтримка"
   if (msg === "💬 Молитвенна потреба") {
     return handlePrayStart(ctx);
   }
@@ -125,6 +131,25 @@ bot.on("text", async (ctx, next) => {
   }
   if (msg === "📖 Пошук літератури") {
     return handleLiteratureStart(ctx);
+  }
+  if (msg === "📞 Зв'язатися з нами") {
+    return handleContact(ctx);
+  }
+  if (msg === "💬 Перейти в чат церкви") {
+    return handleChurchChat(ctx);
+  }
+  if (msg === "🏠 Вийти на головне меню" || msg === "🏠 Повернутися до головного меню") {
+    return handleBackToMainMenu(ctx);
+  }
+
+  // Обробка вибору типу допомоги (через reply keyboard)
+  if (await handleNeedTypeSelection(ctx, msg)) {
+    return;
+  }
+  
+  // Старі кнопки (для сумісності, якщо хтось ще використовує)
+  if (msg === "🙏 Подати заявку") {
+    return handleNeedStart(ctx);
   }
   if (msg === "📞 Контакти") {
     return handleContact(ctx);
@@ -173,6 +198,82 @@ bot.on("text", async (ctx, next) => {
     return;
   }
 
+  // Обробка кнопки "Написати уточнення" від користувача (reply keyboard)
+  if (msg === "✍️ Написати уточнення") {
+    // Перевіряємо, чи це для молитв чи для літератури
+    const prayers = await readPrayers();
+    const userPrayers = prayers.filter(p => p.userId === ctx.from.id && p.needsClarificationReply === true);
+    if (userPrayers.length > 0) {
+      return handlePrayClarifyReplyStart(ctx);
+    }
+    // Спробуємо для літератури
+    const requests = await readLiteratureRequests();
+    const userRequests = requests.filter(r => r.userId === ctx.from.id && r.needsClarificationReply === true);
+    if (userRequests.length > 0) {
+      return handleLiteratureClarifyReplyStart(ctx);
+    }
+    // Якщо нічого не знайдено
+    const menu = await createMainMenu(ctx);
+    return ctx.reply("⚠️ Не знайдено активних уточнень.", menu);
+  }
+
+  // Обробка кнопок адміна для молитвених потреб (reply keyboard)
+  if (msg === "❓ Уточнити") {
+    return handlePrayClarifyStart(ctx, msg);
+  }
+  if (msg === "💬 Відповісти") {
+    return handlePrayReplyStart(ctx, msg);
+  }
+  if (msg === "💬 Остаточна відповідь") {
+    return handlePrayReplyStart(ctx, msg);
+  }
+  if (msg === "🏠 На головне меню") {
+    return handleBackToMainMenu(ctx);
+  }
+
+  // Обробка кнопки адміна для заявок на допомогу (reply keyboard)
+  if (msg === "💬 Написати відповідь") {
+    return handleNeedReplyStart(ctx, msg);
+  }
+
+  // Обробка кнопок адміна для запитів на літературу (reply keyboard)
+  // Перевіряємо, чи є активна сесія для літератури (перевіряємо після молитв, щоб не конфліктувати)
+  if (msg === "❓ Уточнити") {
+    // Перевіряємо, чи це для літератури (якщо є сесія для літератури)
+    if (global.adminLiteratureSessions && global.adminLiteratureSessions.has(ctx.from.id)) {
+      // Перевіряємо, чи це не для молитв
+      if (!(global.adminPrayerSessions && global.adminPrayerSessions.has(ctx.from.id))) {
+        return handleLiteratureClarifyStart(ctx, msg);
+      }
+    }
+  }
+  if (msg === "💬 Відповісти") {
+    // Перевіряємо, чи це для літератури
+    if (global.adminLiteratureSessions && global.adminLiteratureSessions.has(ctx.from.id)) {
+      // Перевіряємо, чи це не для молитв
+      if (!(global.adminPrayerSessions && global.adminPrayerSessions.has(ctx.from.id))) {
+        return handleLiteratureReplyStart(ctx, msg);
+      }
+    }
+  }
+  if (msg === "💬 Остаточна відповідь") {
+    // Перевіряємо, чи це для молитв
+    if (global.adminPrayerSessions && global.adminPrayerSessions.has(ctx.from.id)) {
+      return handlePrayReplyStart(ctx, msg);
+    }
+    // Перевіряємо, чи це для літератури
+    if (global.adminLiteratureSessions && global.adminLiteratureSessions.has(ctx.from.id)) {
+      return handleLiteratureReplyStart(ctx, msg);
+    }
+  }
+
+  // Обробка вибору уроку через reply keyboard
+  if (msg && /^\d+\./.test(msg)) {
+    if (await handleLessonSelection(ctx, msg)) {
+      return;
+    }
+  }
+
   // Спробуємо обробити текст відповіді користувача на уточнення
   if (await handlePrayClarifyReplyText(ctx, msg)) {
     return;
@@ -218,11 +319,11 @@ bot.action(/reply_need_(\d+)/, checkAdmin, handleNeedReplyStart);
 // Уточнення молитвенної потреби (кнопка "Уточнити")
 bot.action(/clarify_prayer_(\d+)/, checkAdmin, handlePrayClarifyStart);
 
-// Відповідь користувача на уточнення молитви (кнопка "Відповісти")
-bot.action(/reply_clarify_prayer_(\d+)_(\d+)/, handlePrayClarifyReplyStart);
+// Стара inline кнопка для відповіді на уточнення (залишаємо для сумісності, але тепер використовується reply keyboard)
+// bot.action(/reply_clarify_prayer_(\d+)_(\d+)/, handlePrayClarifyReplyStart);
 
-// Фінальна відповідь адміна на молитву (кнопка "Відповісти")
-bot.action(/final_reply_prayer_(\d+)_(\d+)/, checkAdmin, handlePrayReplyStart);
+// Відповідь адміна на молитву (кнопка "Відповісти" - остаточна відповідь)
+bot.action(/reply_prayer_(\d+)/, checkAdmin, handlePrayReplyStart);
 
 // Уточнення запиту на літературу (кнопка "Уточнити")
 bot.action(/clarify_literature_(\d+)/, checkAdmin, handleLiteratureClarifyStart);
@@ -255,13 +356,23 @@ bot.action("candidates_show_excel", handleCandidatesShowExcel);
 // Вибір уроку
 bot.action(/lesson_(\d+)/, handleLessonCallback);
 
+// Старі inline кнопки для "Біблія та духовна підтримка" (залишаємо для сумісності, але тепер використовується reply keyboard)
+// bot.action("bible_lessons", async (ctx) => {
+//   await ctx.answerCbQuery("Показую біблійні уроки...");
+//   return handleLessons(ctx);
+// });
+// bot.action("bible_prayer", async (ctx) => {
+//   await ctx.answerCbQuery("Відкриваю форму молитвенної потреби...");
+//   return handlePrayStart(ctx);
+// });
+
 // Вибір статусу хрещення при реєстрації
 bot.action("register_baptized", (ctx) => handleRegisterBaptismStatus(ctx, true));
 bot.action("register_unbaptized", (ctx) => handleRegisterBaptismStatus(ctx, false));
 
-// Вибір типу допомоги
-bot.action("need_type_humanitarian", (ctx) => handleNeedTypeSelection(ctx, "humanitarian"));
-bot.action("need_type_other", (ctx) => handleNeedTypeSelection(ctx, "other"));
+// Старі inline кнопки для типу допомоги (залишаємо для сумісності, але тепер використовується reply keyboard)
+// bot.action("need_type_humanitarian", (ctx) => handleNeedTypeSelection(ctx, "humanitarian"));
+// bot.action("need_type_other", (ctx) => handleNeedTypeSelection(ctx, "other"));
 
 // Вибір цільової аудиторії для оголошення (тільки для адмінів)
 bot.action("announce_baptized", checkAdmin, (ctx) => handleAnnounceAudience(ctx, "baptized"));

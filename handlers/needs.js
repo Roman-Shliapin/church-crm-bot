@@ -9,6 +9,18 @@ import { validateName, validatePhone, sanitizeText } from "../utils/validation.j
 import { generateNeedsExcel, deleteFile } from "../services/excel.js";
 
 /**
+ * Створює меню вибору типу допомоги
+ */
+export function createNeedTypeMenu() {
+  return Markup.keyboard([
+    ["🛒 Гуманітарна допомога", "💬 Інше"],
+    ["🏠 Повернутися до головного меню"]
+  ])
+    .resize()
+    .persistent();
+}
+
+/**
  * Обробник команди /need - тільки для створення заявки
  */
 export async function handleNeedStart(ctx) {
@@ -24,34 +36,46 @@ export async function handleNeedStart(ctx) {
 
   return ctx.reply(
     "🙏 Оберіть тип допомоги:",
-    Markup.inlineKeyboard([
-      [
-        Markup.button.callback("🛒 Гуманітарна допомога", "need_type_humanitarian"),
-      ],
-      [
-        Markup.button.callback("💬 Інше", "need_type_other"),
-      ],
-    ])
+    createNeedTypeMenu()
   );
 }
 
 /**
- * Обробник вибору типу допомоги
+ * Обробник вибору типу допомоги (через reply keyboard)
  */
-export async function handleNeedTypeSelection(ctx, needType) {
+export async function handleNeedTypeSelection(ctx, msg) {
+  const step = ctx.session?.step;
+  if (step !== "need_type_selection") {
+    return false;
+  }
+
   const member = ctx.session?.data?.user;
-  
+  let needType = null;
+
+  if (msg === "🛒 Гуманітарна допомога") {
+    needType = "humanitarian";
+  } else if (msg === "💬 Інше") {
+    needType = "other";
+  } else if (msg === "🏠 Повернутися до головного меню") {
+    const menu = await createMainMenu(ctx);
+    ctx.session = null;
+    return ctx.reply("🏠 Повернулися до головного меню", menu);
+  } else {
+    return false; // Не наш крок
+  }
+
   ctx.session.data.needType = needType;
-  ctx.answerCbQuery(`Обрано: ${needType === "humanitarian" ? "Гуманітарна допомога" : "Інше"}`);
 
   if (member) {
     // Член церкви - тільки опис
     ctx.session.step = "need_description";
-    return ctx.reply("✍️ Опишіть, будь ласка, вашу потребу:", createMainMenu());
+    const menu = await createMainMenu(ctx);
+    return ctx.reply("✍️ Опишіть, будь ласка, вашу потребу:", menu);
   } else {
     // Гість - збираємо дані
     ctx.session.step = "need_guest_name";
-    return ctx.reply("👋 Вкажіть, будь ласка, ваше ім'я та прізвище:", createMainMenu());
+    const menu = await createMainMenu(ctx);
+    return ctx.reply("👋 Вкажіть, будь ласка, ваше ім'я та прізвище:", menu);
   }
 }
 
@@ -167,7 +191,8 @@ export async function handleNeedSteps(ctx, msg) {
     });
 
     await addNeed(need);
-    await ctx.reply("✅ Дякуємо! Ваша заявка збережена. Ми з вами зв'яжемось 🙏", createMainMenu());
+    const menu = await createMainMenu(ctx);
+    await ctx.reply("✅ Дякуємо! Ваша заявка збережена. Ми з вами зв'яжемось 🙏", menu);
 
     // Повідомлення адмінам
     await notifyAdmins(ctx, need);
@@ -193,7 +218,8 @@ export async function handleNeedSteps(ctx, msg) {
     });
 
     await addNeed(need);
-    await ctx.reply("✅ Ваша заявка на допомогу збережена 🙏", createMainMenu());
+    const menu = await createMainMenu(ctx);
+    await ctx.reply("✅ Ваша заявка на допомогу збережена 🙏", menu);
 
     // Повідомлення адмінам
     await notifyAdmins(ctx, need);
@@ -205,24 +231,39 @@ export async function handleNeedSteps(ctx, msg) {
 }
 
 /**
+ * Створює меню для адміна при отриманні заявки на допомогу (без ID в тексті)
+ */
+function createAdminNeedMenu() {
+  return Markup.keyboard([
+    ["💬 Написати відповідь"]
+  ])
+    .resize()
+    .persistent();
+}
+
+/**
  * Надсилає повідомлення адмінам про нову заявку
  */
 async function notifyAdmins(ctx, need) {
   const adminMessage = createAdminNotification(need);
   console.log("🟢 Надсилаю повідомлення адмінам:", ADMIN_IDS);
 
-  const replyKeyboard = Markup.inlineKeyboard([
-    [
-      Markup.button.callback("💬 Написати відповідь", `reply_need_${need.id}`)
-    ]
-  ]);
+  // Використовуємо reply keyboard меню замість inline кнопок
+  const replyKeyboard = createAdminNeedMenu();
 
   for (const adminId of ADMIN_IDS) {
     try {
+      // Відправляємо повідомлення адміну
       await ctx.telegram.sendMessage(adminId, adminMessage, {
         parse_mode: "Markdown",
         reply_markup: replyKeyboard.reply_markup,
       });
+      
+      // Зберігаємо needId в сесії адміна
+      if (!global.adminNeedSessions) {
+        global.adminNeedSessions = new Map();
+      }
+      global.adminNeedSessions.set(adminId, need.id);
     } catch (err) {
       console.error("❌ Помилка надсилання адміну:", err);
     }
@@ -280,14 +321,37 @@ export async function handleNeedStatusChange(ctx) {
 }
 
 /**
- * Обробник кнопки "Написати відповідь" на заявку
+ * Обробник кнопки "Написати відповідь" на заявку (через reply keyboard)
  */
-export async function handleNeedReplyStart(ctx) {
-  const needId = parseInt(ctx.match[1]);
+export async function handleNeedReplyStart(ctx, msg = null) {
+  let needId;
+  
+  // Якщо викликано через reply keyboard (msg містить текст кнопки)
+  if (msg && msg === "💬 Написати відповідь") {
+    // Отримуємо needId з сесії адміна
+    if (global.adminNeedSessions && global.adminNeedSessions.has(ctx.from.id)) {
+      needId = global.adminNeedSessions.get(ctx.from.id);
+    } else {
+      await ctx.reply("⚠️ Не знайдено активної заявки. Очікуйте нове повідомлення.");
+      return;
+    }
+  } else if (ctx.match) {
+    // Якщо викликано через callback (inline кнопка - для сумісності)
+    needId = parseInt(ctx.match[1]);
+  } else {
+    await ctx.reply("⚠️ Помилка обробки запиту.");
+    return;
+  }
+  
   const need = await findNeedById(needId);
 
   if (!need) {
-    return ctx.answerCbQuery("⚠️ Заявка не знайдена");
+    if (msg) {
+      await ctx.reply("⚠️ Заявка не знайдена");
+    } else {
+      await ctx.answerCbQuery("⚠️ Заявка не знайдена");
+    }
+    return;
   }
 
   // Зберігаємо в сесії, що адмін хоче відповісти на цю заявку
@@ -296,7 +360,6 @@ export async function handleNeedReplyStart(ctx) {
     data: { needId, userId: need.userId }
   };
 
-  await ctx.answerCbQuery("✍️ Введіть текст відповіді:");
   await ctx.reply(
     `✍️ Введіть текст відповіді для ${need.name}:\n\n` +
     `(Ви можете використати до 4000 символів)`
@@ -327,11 +390,19 @@ export async function handleNeedReplyText(ctx, msg) {
       parse_mode: "Markdown",
     });
 
-    await ctx.reply("✅ Відповідь успішно надіслана!");
+    // Очищаємо сесію адміна для цієї заявки
+    if (global.adminNeedSessions) {
+      global.adminNeedSessions.delete(ctx.from.id);
+    }
+
+    // Повертаємо головне меню адміну
+    const menu = await createMainMenu(ctx);
+    await ctx.reply("✅ Відповідь успішно надіслана!", menu);
     ctx.session = null;
   } catch (err) {
     console.error("Помилка надсилання відповіді:", err);
-    await ctx.reply("⚠️ Помилка надсилання відповіді. Можливо, користувач заблокував бота.");
+    const menu = await createMainMenu(ctx);
+    await ctx.reply("⚠️ Помилка надсилання відповіді. Можливо, користувач заблокував бота.", menu);
     ctx.session = null;
   }
 
