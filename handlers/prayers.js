@@ -106,8 +106,8 @@ export async function handleAdminPrayersManageList(ctx) {
   const buildPrayerManageKeyboard = (prayer) => {
     // Вимога (аналогічно needs):
     // - після "Відповісти": прибрати "Відповісти", лишити "В процесі" + "Виконано"
-    // - після "В процесі": лишити тільки "Виконано" (і "Відповісти" теж прибрати)
-    const showReply = !prayer?.repliedAt && !prayer?.inProgressAt;
+    // - після "В процесі": прибрати "В процесі", але лишити "Відповісти" + "Виконано"
+    const showReply = !prayer?.repliedAt;
     const showProgress = !prayer?.inProgressAt;
     const rows = [];
 
@@ -199,10 +199,12 @@ export async function handleAdminPrayerMarkProgress(ctx) {
   try {
     const base = formatPrayerMessage(updated || prayer);
     const statusLine = `\n⚙️ *Статус:* ${(updated || prayer).status || "в процесі"}`;
-    // Після "В процесі" лишаємо тільки "✅ Виконано"
+    // Після "В процесі" лишаємо "✅ Виконано" і, якщо ще не відповідали, "💬 Відповісти"
+    const showReply = !(updated || prayer)?.repliedAt;
     await ctx.editMessageText(base + statusLine + "\n\n⏳ *В процесі*", {
       parse_mode: "Markdown",
       reply_markup: Markup.inlineKeyboard([
+        ...(showReply ? [[Markup.button.callback("💬 Відповісти", `reply_prayer_${prayerId}`)]] : []),
         [Markup.button.callback("✅ Виконано", `prayer_done_${prayerId}`)],
       ]).reply_markup,
     });
