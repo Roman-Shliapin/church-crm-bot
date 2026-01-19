@@ -161,7 +161,15 @@ export async function handleAdminPrayerMarkProgress(ctx) {
     return ctx.answerCbQuery("⚠️ Молитвенна потреба не знайдена");
   }
 
-  const updated = await updatePrayerFields(prayerId, { status: "в процесі" });
+  const now = new Date().toISOString();
+  const updated = await updatePrayerFields(prayerId, {
+    status: "в процесі",
+    inProgressAt: now,
+    inProgressBy: ctx.from?.id,
+    lastAction: "in_progress",
+    lastActionAt: now,
+    lastActionBy: ctx.from?.id,
+  });
   await ctx.answerCbQuery("⏳ Позначено: в процесі");
 
   try {
@@ -176,18 +184,7 @@ export async function handleAdminPrayerMarkProgress(ctx) {
   try {
     const base = formatPrayerMessage(updated || prayer);
     const statusLine = `\n⚙️ *Статус:* ${(updated || prayer).status || "в процесі"}`;
-    await ctx.editMessageText(base + statusLine, {
-      parse_mode: "Markdown",
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: "💬 Відповісти", callback_data: `reply_prayer_${prayerId}` }],
-          [
-            { text: "✅ Виконано", callback_data: `prayer_done_${prayerId}` },
-            { text: "⏳ В процесі", callback_data: `prayer_progress_${prayerId}` },
-          ],
-        ],
-      },
-    });
+    await ctx.editMessageText(base + statusLine + "\n\n⏳ *В процесі*", { parse_mode: "Markdown" });
   } catch (err) {
     // ignore
   }
@@ -204,20 +201,89 @@ export async function handleAdminPrayerMarkDone(ctx) {
     return ctx.answerCbQuery("⚠️ Молитвенна потреба не знайдена");
   }
 
-  const updated = await updatePrayerFields(prayerId, {
-    status: "виконано",
-    archived: true,
-    doneAt: new Date().toISOString(),
-  });
+  // Переходимо в режим "виконано + повідомлення"
+  ctx.session = {
+    step: "prayer_done_reply_text",
+    data: {
+      prayerId,
+      userId: prayer.userId,
+      messageChatId: ctx.chat?.id,
+      messageId: ctx.update?.callback_query?.message?.message_id,
+    },
+  };
 
-  await ctx.answerCbQuery("✅ Позначено: виконано");
+  await ctx.answerCbQuery("✍️ Напишіть повідомлення і потреба буде виконана");
+  await ctx.reply(
+    "✍️ Введіть повідомлення для людини.\n\n" +
+      "Після відправки молитвена потреба буде *виконана* та потрапить в *архів*.",
+    { parse_mode: "Markdown" }
+  );
+}
+
+/**
+ * Адмін: текст для сценарію "виконано + повідомлення" (після натискання ✅ Виконано)
+ */
+export async function handleAdminPrayerDoneText(ctx, msg) {
+  if (ctx.session?.step !== "prayer_done_reply_text") return false;
+
+  const { prayerId, userId, messageChatId, messageId } = ctx.session.data || {};
+  const sanitizedText = sanitizeText(msg, 4000);
+  if (!sanitizedText) {
+    await ctx.reply("⚠️ Текст не може бути порожнім або перевищувати 4000 символів.");
+    return true;
+  }
+
+  const prayer = await findPrayerById(prayerId);
+  if (!prayer) {
+    const menu = await createMainMenu(ctx);
+    await ctx.reply("⚠️ Молитвенна потреба не знайдена.", menu);
+    ctx.session = null;
+    return true;
+  }
 
   try {
-    const base = formatPrayerMessage(updated || prayer);
-    const statusLine = `\n⚙️ *Статус:* ${(updated || prayer).status || "виконано"}`;
-    await ctx.editMessageText(base + statusLine + "\n\n✅ *Виконано*", { parse_mode: "Markdown" });
+    const now = new Date().toISOString();
+    // 1) Надсилаємо повідомлення користувачу
+    const userMessage = `📬 *Повідомлення щодо вашої молитвенної потреби:*\n\n${sanitizedText}`;
+    await ctx.telegram.sendMessage(userId, userMessage, { parse_mode: "Markdown" });
+
+    // 2) Архівуємо в БД (НЕ видаляємо) + фіксуємо дію адміна
+    const updated = await updatePrayerFields(prayerId, {
+      status: "виконано",
+      archived: true,
+      doneAt: now,
+      doneMessage: sanitizedText,
+      doneBy: ctx.from?.id,
+      lastAction: "done",
+      lastActionAt: now,
+      lastActionBy: ctx.from?.id,
+    });
+
+    // 3) Прибираємо кнопки під повідомленням у Telegram
+    try {
+      if (messageChatId && messageId) {
+        const base = formatPrayerMessage(updated || prayer);
+        const statusLine = `\n⚙️ *Статус:* ${(updated || prayer).status || "виконано"}`;
+        await ctx.telegram.editMessageText(messageChatId, messageId, undefined, base + statusLine + "\n\n✅ *Виконано*", {
+          parse_mode: "Markdown",
+        });
+      }
+    } catch (err) {
+      // ignore
+    }
+
+    const menu = await createMainMenu(ctx);
+    await ctx.reply("✅ Виконано: повідомлення надіслано, потреба додана в архів.", menu);
+    ctx.session = null;
+    return true;
   } catch (err) {
-    // ignore
+    const menu = await createMainMenu(ctx);
+    await ctx.reply(
+      "⚠️ Не вдалося надіслати повідомлення користувачу (можливо, він заблокував бота).",
+      menu
+    );
+    ctx.session = null;
+    return true;
   }
 }
 
@@ -571,7 +637,13 @@ export async function handlePrayReplyStart(ctx, msg = null) {
   // Зберігаємо в сесії, що адмін хоче відповісти (остаточна відповідь)
   ctx.session = {
     step: "pray_reply_text",
-    data: { prayerId, userId: prayer.userId }
+    data: {
+      prayerId,
+      userId: prayer.userId,
+      // щоб після відповіді прибрати кнопки в повідомленні зі списку
+      messageChatId: ctx.chat?.id,
+      messageId: ctx.update?.callback_query?.message?.message_id,
+    }
   };
 
   await ctx.reply(
@@ -590,7 +662,7 @@ export async function handlePrayReplyText(ctx, msg) {
     return false;
   }
 
-  const { prayerId, userId } = ctx.session.data;
+  const { prayerId, userId, messageChatId, messageId } = ctx.session.data;
   const sanitizedText = sanitizeText(msg, 4000);
   
   if (!sanitizedText) {
@@ -599,11 +671,22 @@ export async function handlePrayReplyText(ctx, msg) {
   }
 
   try {
+    const now = new Date().toISOString();
     // Оновлюємо prayer - відповідь надіслано
     const collection = await getCollection("prayers");
     await collection.findOneAndUpdate(
       { id: prayerId },
-      { $set: { needsClarificationReply: false, finalReply: sanitizedText } }
+      {
+        $set: {
+          needsClarificationReply: false,
+          finalReply: sanitizedText,
+          repliedAt: now,
+          repliedBy: ctx.from?.id,
+          lastAction: "replied",
+          lastActionAt: now,
+          lastActionBy: ctx.from?.id,
+        },
+      }
     );
 
     // Очищаємо сесію адміна для цієї молитви
@@ -619,6 +702,24 @@ export async function handlePrayReplyText(ctx, msg) {
       parse_mode: "Markdown",
       reply_markup: userMenu.reply_markup,
     });
+
+    // Прибираємо кнопки під повідомленням у списку (щоб було видно, що вже відповіли)
+    try {
+      if (messageChatId && messageId) {
+        const current = await findPrayerById(prayerId);
+        const base = formatPrayerMessage(current || { name: "Анонімно", description: "-", date: "-" });
+        const statusLine = current?.status ? `\n⚙️ *Статус:* ${current.status}` : "";
+        await ctx.telegram.editMessageText(
+          messageChatId,
+          messageId,
+          undefined,
+          base + statusLine + "\n\n✅ *Відповідь надіслана*",
+          { parse_mode: "Markdown" }
+        );
+      }
+    } catch (err) {
+      // ignore
+    }
 
     // Повертаємо головне меню адміну
     const menu = await createMainMenu(ctx);

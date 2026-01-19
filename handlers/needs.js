@@ -198,8 +198,16 @@ export async function handleAdminNeedMarkProgress(ctx) {
     return ctx.answerCbQuery("⚠️ Заявка не знайдена");
   }
 
-  // Оновлюємо статус у БД
-  const updated = await updateNeedStatus(needId, NEED_STATUS.WAITING);
+  // Оновлюємо статус у БД + фіксуємо дію адміна
+  const now = new Date().toISOString();
+  const updated = await updateNeedFields(needId, {
+    status: NEED_STATUS.WAITING,
+    inProgressAt: now,
+    inProgressBy: ctx.from?.id,
+    lastAction: "in_progress",
+    lastActionAt: now,
+    lastActionBy: ctx.from?.id,
+  });
   await ctx.answerCbQuery("⏳ Позначено: в процесі");
 
   // Повідомляємо користувача
@@ -212,20 +220,11 @@ export async function handleAdminNeedMarkProgress(ctx) {
     // якщо користувач заблокував бота — просто мовчки
   }
 
-  // Оновлюємо повідомлення у чаті адміна
+  // Оновлюємо повідомлення у чаті адміна і ПРИБИРАЄМО кнопки (щоб було видно, що опрацьовано)
   try {
     const msg = formatNeedMessage(updated || need);
-    await ctx.editMessageText(msg, {
+    await ctx.editMessageText(msg + "\n\n⏳ *В процесі*", {
       parse_mode: "Markdown",
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: "💬 Відповісти", callback_data: `reply_need_${needId}` }],
-          [
-            { text: "✅ Виконано", callback_data: `need_done_${needId}` },
-            { text: "⏳ В процесі", callback_data: `need_progress_${needId}` },
-          ],
-        ],
-      },
     });
   } catch (err) {
     // ignore
@@ -243,20 +242,88 @@ export async function handleAdminNeedMarkDone(ctx) {
     return ctx.answerCbQuery("⚠️ Заявка не знайдена");
   }
 
-  const updated = await updateNeedFields(needId, {
-    status: NEED_STATUS.DONE,
-    archived: true,
-    doneAt: new Date().toISOString(),
-  });
+  // Переходимо в режим "виконано + повідомлення"
+  ctx.session = {
+    step: "need_done_reply_text",
+    data: {
+      needId,
+      userId: need.userId,
+      messageChatId: ctx.chat?.id,
+      messageId: ctx.update?.callback_query?.message?.message_id,
+    },
+  };
 
-  await ctx.answerCbQuery("✅ Позначено: виконано");
+  await ctx.answerCbQuery("✍️ Напишіть повідомлення і заявка буде виконана");
+  await ctx.reply(
+    "✍️ Введіть повідомлення для людини.\n\n" +
+      "Після відправки заявка буде *виконана* та потрапить в *архів*.",
+    { parse_mode: "Markdown" }
+  );
+}
 
-  // Прибираємо кнопки під повідомленням, щоб "зникло зі списку"
+/**
+ * Адмін: текст для сценарію "виконано + повідомлення" (після натискання ✅ Виконано)
+ */
+export async function handleAdminNeedDoneText(ctx, msg) {
+  if (ctx.session?.step !== "need_done_reply_text") return false;
+
+  const { needId, userId, messageChatId, messageId } = ctx.session.data || {};
+  const sanitizedText = sanitizeText(msg, 4000);
+  if (!sanitizedText) {
+    await ctx.reply("⚠️ Текст не може бути порожнім або перевищувати 4000 символів.");
+    return true;
+  }
+
+  const need = await findNeedById(needId);
+  if (!need) {
+    const menu = await createMainMenu(ctx);
+    await ctx.reply("⚠️ Заявка не знайдена.", menu);
+    ctx.session = null;
+    return true;
+  }
+
   try {
-    const msg = formatNeedMessage(updated || need) + "\n\n✅ *Виконано*";
-    await ctx.editMessageText(msg, { parse_mode: "Markdown" });
+    // 1) Надсилаємо повідомлення користувачу
+    const userMessage = `📬 *Повідомлення щодо вашої заявки на допомогу:*\n\n${sanitizedText}`;
+    await ctx.telegram.sendMessage(userId, userMessage, { parse_mode: "Markdown" });
+
+    // 2) Архівуємо в БД (НЕ видаляємо) + фіксуємо дію адміна
+    const now = new Date().toISOString();
+    const updated = await updateNeedFields(needId, {
+      status: NEED_STATUS.DONE,
+      archived: true,
+      doneAt: now,
+      doneMessage: sanitizedText,
+      doneBy: ctx.from?.id,
+      lastAction: "done",
+      lastActionAt: now,
+      lastActionBy: ctx.from?.id,
+    });
+
+    // 3) Прибираємо кнопки під повідомленням у Telegram (щоб зникло зі списку)
+    try {
+      if (messageChatId && messageId) {
+        const text = formatNeedMessage(updated || need) + "\n\n✅ *Виконано*";
+        await ctx.telegram.editMessageText(messageChatId, messageId, undefined, text, {
+          parse_mode: "Markdown",
+        });
+      }
+    } catch (err) {
+      // ignore
+    }
+
+    const menu = await createMainMenu(ctx);
+    await ctx.reply("✅ Виконано: повідомлення надіслано, заявка додана в архів.", menu);
+    ctx.session = null;
+    return true;
   } catch (err) {
-    // ignore
+    const menu = await createMainMenu(ctx);
+    await ctx.reply(
+      "⚠️ Не вдалося надіслати повідомлення користувачу (можливо, він заблокував бота).",
+      menu
+    );
+    ctx.session = null;
+    return true;
   }
 }
 
@@ -479,7 +546,13 @@ export async function handleNeedReplyStart(ctx, msg = null) {
   // Зберігаємо в сесії, що адмін хоче відповісти на цю заявку
   ctx.session = {
     step: "need_reply_text",
-    data: { needId, userId: need.userId }
+    data: {
+      needId,
+      userId: need.userId,
+      // щоб після відповіді прибрати кнопки в повідомленні зі списку
+      messageChatId: ctx.chat?.id,
+      messageId: ctx.update?.callback_query?.message?.message_id,
+    }
   };
 
   await ctx.reply(
@@ -497,7 +570,7 @@ export async function handleNeedReplyText(ctx, msg) {
     return false;
   }
 
-  const { needId, userId } = ctx.session.data;
+  const { needId, userId, messageChatId, messageId } = ctx.session.data;
   const sanitizedText = sanitizeText(msg, 4000);
   
   if (!sanitizedText) {
@@ -506,11 +579,35 @@ export async function handleNeedReplyText(ctx, msg) {
   }
 
   try {
+    const now = new Date().toISOString();
     // Відправляємо повідомлення користувачу
     const userMessage = `📬 *Відповідь на вашу заявку:*\n\n${sanitizedText}`;
     await ctx.telegram.sendMessage(userId, userMessage, {
       parse_mode: "Markdown",
     });
+
+    // Фіксуємо відповідь адміна в БД (НЕ архівуємо)
+    await updateNeedFields(needId, {
+      repliedAt: now,
+      repliedBy: ctx.from?.id,
+      replyMessage: sanitizedText,
+      lastAction: "replied",
+      lastActionAt: now,
+      lastActionBy: ctx.from?.id,
+    });
+
+    // Прибираємо кнопки під повідомленням у списку (щоб було видно, що вже відповіли)
+    try {
+      if (messageChatId && messageId) {
+        const currentNeed = await findNeedById(needId);
+        const text = formatNeedMessage(currentNeed || { id: needId, status: "оновлено", name: "-", baptism: "-", phone: "-", description: "-", type: "other", date: "-" }) + "\n\n✅ *Відповідь надіслана*";
+        await ctx.telegram.editMessageText(messageChatId, messageId, undefined, text, {
+          parse_mode: "Markdown",
+        });
+      }
+    } catch (err) {
+      // ignore
+    }
 
     // Очищаємо сесію адміна для цієї заявки
     if (global.adminNeedSessions) {

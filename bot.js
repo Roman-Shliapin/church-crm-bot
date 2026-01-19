@@ -10,8 +10,8 @@ import { handleStart, handleHelp, createMainMenu, handleBibleSupport, handleAdmi
 import { handleRegisterStart, handleRegisterSteps, handleRegisterBaptismStatus } from "./handlers/register.js";
 import { handleMe, handleMembers, handleMembersShowChat, handleMembersShowExcel } from "./handlers/members.js";
 import { handleCandidates, handleCandidatesShowChat, handleCandidatesShowExcel } from "./handlers/candidates.js";
-import { handleNeedStart, handleNeedTypeSelection, handleNeedSteps, handleNeedsList, handleNeedsShowChat, handleNeedsShowExcel, handleNeedStatusChange, handleNeedReplyStart, handleNeedReplyText, handleAdminNeedsManageList, handleAdminNeedsArchiveList, handleAdminNeedMarkDone, handleAdminNeedMarkProgress } from "./handlers/needs.js";
-import { handlePrayStart, handlePraySteps, handlePrayersList, handlePrayersShowChat, handlePrayersShowExcel, handlePrayClarifyStart, handlePrayClarifyText, handlePrayClarifyReplyStart, handlePrayClarifyReplyText, handlePrayReplyStart, handlePrayReplyText, handleAdminPrayersManageList, handleAdminPrayersArchiveList, handleAdminPrayerMarkDone, handleAdminPrayerMarkProgress } from "./handlers/prayers.js";
+import { handleNeedStart, handleNeedTypeSelection, handleNeedSteps, handleNeedsList, handleNeedsShowChat, handleNeedsShowExcel, handleNeedStatusChange, handleNeedReplyStart, handleNeedReplyText, handleAdminNeedsManageList, handleAdminNeedsArchiveList, handleAdminNeedMarkDone, handleAdminNeedMarkProgress, handleAdminNeedDoneText } from "./handlers/needs.js";
+import { handlePrayStart, handlePraySteps, handlePrayersList, handlePrayersShowChat, handlePrayersShowExcel, handlePrayClarifyStart, handlePrayClarifyText, handlePrayClarifyReplyStart, handlePrayClarifyReplyText, handlePrayReplyStart, handlePrayReplyText, handleAdminPrayersManageList, handleAdminPrayersArchiveList, handleAdminPrayerMarkDone, handleAdminPrayerMarkProgress, handleAdminPrayerDoneText } from "./handlers/prayers.js";
 import { readPrayers, readLiteratureRequests } from "./services/storage.js";
 import { handleLessons, handleLessonSelection, handleLessonCallback } from "./handlers/lessons.js";
 import { handleUploadLessonStart, handleUploadLessonName, handleUploadLessonFile } from "./handlers/lessonsAdmin.js";
@@ -215,6 +215,11 @@ bot.on("text", async (ctx, next) => {
     return;
   }
 
+  // Спробуємо обробити текст "виконано + повідомлення" для заявки
+  if (await handleAdminNeedDoneText(ctx, msg)) {
+    return;
+  }
+
   // Спробуємо обробити текст уточнення адміна на молитву
   if (await handlePrayClarifyText(ctx, msg)) {
     return;
@@ -274,6 +279,11 @@ bot.on("text", async (ctx, next) => {
 
   // Спробуємо обробити текст фінальної відповіді адміна на молитву
   if (await handlePrayReplyText(ctx, msg)) {
+    return;
+  }
+
+  // Спробуємо обробити текст "виконано + повідомлення" для молитви
+  if (await handleAdminPrayerDoneText(ctx, msg)) {
     return;
   }
 
