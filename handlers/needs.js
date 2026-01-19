@@ -140,19 +140,32 @@ export async function handleAdminNeedsManageList(ctx) {
 
   await ctx.reply(`🆘 Активні заявки на допомогу: ${needs.length}`);
 
+  const buildNeedManageKeyboard = (need) => {
+    // Вимога:
+    // - після "Відповісти": прибрати "Відповісти", лишити "В процесі" + "Виконано"
+    // - після "В процесі": лишити тільки "Виконано" (і "Відповісти" теж прибрати)
+    const showReply = !need?.repliedAt && !need?.inProgressAt;
+    const showProgress = !need?.inProgressAt;
+    const rows = [];
+
+    if (showReply) {
+      rows.push([Markup.button.callback("💬 Відповісти", `reply_need_${need.id}`)]);
+    }
+
+    const row2 = [Markup.button.callback("✅ Виконано", `need_done_${need.id}`)];
+    if (showProgress) {
+      row2.push(Markup.button.callback("⏳ В процесі", `need_progress_${need.id}`));
+    }
+    rows.push(row2);
+
+    return Markup.inlineKeyboard(rows);
+  };
+
   for (const need of needs) {
     const message = formatNeedMessage(need);
     await ctx.replyWithMarkdown(
       message,
-      Markup.inlineKeyboard([
-        [
-          Markup.button.callback("💬 Відповісти", `reply_need_${need.id}`),
-        ],
-        [
-          Markup.button.callback("✅ Виконано", `need_done_${need.id}`),
-          Markup.button.callback("⏳ В процесі", `need_progress_${need.id}`),
-        ],
-      ])
+      buildNeedManageKeyboard(need)
     );
   }
 }
@@ -223,8 +236,12 @@ export async function handleAdminNeedMarkProgress(ctx) {
   // Оновлюємо повідомлення у чаті адміна і ПРИБИРАЄМО кнопки (щоб було видно, що опрацьовано)
   try {
     const msg = formatNeedMessage(updated || need);
+    // Після "В процесі" лишаємо тільки "✅ Виконано"
     await ctx.editMessageText(msg + "\n\n⏳ *В процесі*", {
       parse_mode: "Markdown",
+      reply_markup: Markup.inlineKeyboard([
+        [Markup.button.callback("✅ Виконано", `need_done_${needId}`)],
+      ]).reply_markup,
     });
   } catch (err) {
     // ignore
@@ -596,13 +613,27 @@ export async function handleNeedReplyText(ctx, msg) {
       lastActionBy: ctx.from?.id,
     });
 
-    // Прибираємо кнопки під повідомленням у списку (щоб було видно, що вже відповіли)
+    // Оновлюємо кнопки під повідомленням у списку:
+    // після "Відповісти" прибираємо тільки "💬 Відповісти", лишаємо "⏳ В процесі" + "✅ Виконано"
     try {
       if (messageChatId && messageId) {
         const currentNeed = await findNeedById(needId);
-        const text = formatNeedMessage(currentNeed || { id: needId, status: "оновлено", name: "-", baptism: "-", phone: "-", description: "-", type: "other", date: "-" }) + "\n\n✅ *Відповідь надіслана*";
+        const safeNeed =
+          currentNeed ||
+          { id: needId, status: "оновлено", name: "-", baptism: "-", phone: "-", description: "-", type: "other", date: "-" };
+        const text = formatNeedMessage(safeNeed) + "\n\n✅ *Відповідь надіслана*";
+
+        // Якщо заявка вже "в процесі" — лишаємо тільки "✅ Виконано"
+        const keyboardRows = safeNeed?.inProgressAt
+          ? [[Markup.button.callback("✅ Виконано", `need_done_${needId}`)]]
+          : [[
+              Markup.button.callback("✅ Виконано", `need_done_${needId}`),
+              Markup.button.callback("⏳ В процесі", `need_progress_${needId}`),
+            ]];
+
         await ctx.telegram.editMessageText(messageChatId, messageId, undefined, text, {
           parse_mode: "Markdown",
+          reply_markup: Markup.inlineKeyboard(keyboardRows).reply_markup,
         });
       }
     } catch (err) {

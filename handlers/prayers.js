@@ -103,19 +103,34 @@ export async function handleAdminPrayersManageList(ctx) {
 
   await ctx.reply(`🙏 Активні молитвені потреби: ${prayers.length}`);
 
+  const buildPrayerManageKeyboard = (prayer) => {
+    // Вимога (аналогічно needs):
+    // - після "Відповісти": прибрати "Відповісти", лишити "В процесі" + "Виконано"
+    // - після "В процесі": лишити тільки "Виконано" (і "Відповісти" теж прибрати)
+    const showReply = !prayer?.repliedAt && !prayer?.inProgressAt;
+    const showProgress = !prayer?.inProgressAt;
+    const rows = [];
+
+    if (showReply) {
+      rows.push([Markup.button.callback("💬 Відповісти", `reply_prayer_${prayer.id}`)]);
+    }
+
+    const row2 = [Markup.button.callback("✅ Виконано", `prayer_done_${prayer.id}`)];
+    if (showProgress) {
+      row2.push(Markup.button.callback("⏳ В процесі", `prayer_progress_${prayer.id}`));
+    }
+    rows.push(row2);
+
+    return Markup.inlineKeyboard(rows);
+  };
+
   for (const prayer of prayers) {
     const base = formatPrayerMessage(prayer);
     const statusLine = prayer.status ? `\n⚙️ *Статус:* ${prayer.status}` : "";
     const message = base + statusLine;
     await ctx.replyWithMarkdown(
       message,
-      Markup.inlineKeyboard([
-        [Markup.button.callback("💬 Відповісти", `reply_prayer_${prayer.id}`)],
-        [
-          Markup.button.callback("✅ Виконано", `prayer_done_${prayer.id}`),
-          Markup.button.callback("⏳ В процесі", `prayer_progress_${prayer.id}`),
-        ],
-      ])
+      buildPrayerManageKeyboard(prayer)
     );
   }
 }
@@ -184,7 +199,13 @@ export async function handleAdminPrayerMarkProgress(ctx) {
   try {
     const base = formatPrayerMessage(updated || prayer);
     const statusLine = `\n⚙️ *Статус:* ${(updated || prayer).status || "в процесі"}`;
-    await ctx.editMessageText(base + statusLine + "\n\n⏳ *В процесі*", { parse_mode: "Markdown" });
+    // Після "В процесі" лишаємо тільки "✅ Виконано"
+    await ctx.editMessageText(base + statusLine + "\n\n⏳ *В процесі*", {
+      parse_mode: "Markdown",
+      reply_markup: Markup.inlineKeyboard([
+        [Markup.button.callback("✅ Виконано", `prayer_done_${prayerId}`)],
+      ]).reply_markup,
+    });
   } catch (err) {
     // ignore
   }
@@ -703,18 +724,31 @@ export async function handlePrayReplyText(ctx, msg) {
       reply_markup: userMenu.reply_markup,
     });
 
-    // Прибираємо кнопки під повідомленням у списку (щоб було видно, що вже відповіли)
+    // Оновлюємо кнопки під повідомленням у списку:
+    // після "Відповісти" прибираємо тільки "💬 Відповісти", лишаємо "⏳ В процесі" + "✅ Виконано"
     try {
       if (messageChatId && messageId) {
         const current = await findPrayerById(prayerId);
         const base = formatPrayerMessage(current || { name: "Анонімно", description: "-", date: "-" });
         const statusLine = current?.status ? `\n⚙️ *Статус:* ${current.status}` : "";
+
+        // Якщо молитва вже "в процесі" — лишаємо тільки "✅ Виконано"
+        const keyboardRows = current?.inProgressAt
+          ? [[Markup.button.callback("✅ Виконано", `prayer_done_${prayerId}`)]]
+          : [[
+              Markup.button.callback("✅ Виконано", `prayer_done_${prayerId}`),
+              Markup.button.callback("⏳ В процесі", `prayer_progress_${prayerId}`),
+            ]];
+
         await ctx.telegram.editMessageText(
           messageChatId,
           messageId,
           undefined,
           base + statusLine + "\n\n✅ *Відповідь надіслана*",
-          { parse_mode: "Markdown" }
+          {
+            parse_mode: "Markdown",
+            reply_markup: Markup.inlineKeyboard(keyboardRows).reply_markup,
+          }
         );
       }
     } catch (err) {
