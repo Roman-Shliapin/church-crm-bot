@@ -225,6 +225,38 @@ export async function readNeeds() {
 }
 
 /**
+ * Читає активні (не заархівовані) заявки на допомогу з MongoDB
+ * ВАЖЛИВО: "Виконано" не видаляє запис з БД, а ставить archived=true,
+ * щоб він більше не показувався в списку в Telegram.
+ * @returns {Promise<Array>} Масив активних заявок
+ */
+export async function readActiveNeeds() {
+  try {
+    const collection = await getCollection(COLLECTIONS.NEEDS);
+    const needs = await collection.find({ archived: { $ne: true } }).toArray();
+    return needs.map(({ _id, ...need }) => need);
+  } catch (err) {
+    logError("Помилка читання active needs з MongoDB", err);
+    return [];
+  }
+}
+
+/**
+ * Читає виконані/заархівовані заявки на допомогу з MongoDB
+ * @returns {Promise<Array>}
+ */
+export async function readArchivedNeeds() {
+  try {
+    const collection = await getCollection(COLLECTIONS.NEEDS);
+    const needs = await collection.find({ archived: true }).toArray();
+    return needs.map(({ _id, ...need }) => need);
+  } catch (err) {
+    logError("Помилка читання archived needs з MongoDB", err);
+    return [];
+  }
+}
+
+/**
  * Зберігає масив заявок на допомогу в MongoDB
  * @param {Array} needs - Масив заявок на допомогу
  */
@@ -302,6 +334,29 @@ export async function updateNeedStatus(needId, newStatus) {
   }
 }
 
+/**
+ * Оновлює довільні поля заявки (НЕ видаляє запис)
+ * @param {number|string} needId
+ * @param {Object} fields
+ * @returns {Promise<Object|null>}
+ */
+export async function updateNeedFields(needId, fields) {
+  try {
+    const collection = await getCollection(COLLECTIONS.NEEDS);
+    const result = await collection.findOneAndUpdate(
+      { id: parseInt(needId) },
+      { $set: fields },
+      { returnDocument: "after" }
+    );
+    if (!result.value) return null;
+    const { _id, ...needData } = result.value;
+    return needData;
+  } catch (err) {
+    logError("Помилка оновлення need fields в MongoDB", err);
+    return null;
+  }
+}
+
 // ==================== МОЛИТВЕННІ ПОТРЕБИ ====================
 
 /**
@@ -316,6 +371,59 @@ export async function readPrayers() {
   } catch (err) {
     logError("Помилка читання prayers з MongoDB", err);
     return [];
+  }
+}
+
+/**
+ * Читає активні (не заархівовані) молитвені потреби з MongoDB
+ * @returns {Promise<Array>}
+ */
+export async function readActivePrayers() {
+  try {
+    const collection = await getCollection(COLLECTIONS.PRAYERS);
+    const prayers = await collection.find({ archived: { $ne: true } }).toArray();
+    return prayers.map(({ _id, ...prayer }) => prayer);
+  } catch (err) {
+    logError("Помилка читання active prayers з MongoDB", err);
+    return [];
+  }
+}
+
+/**
+ * Читає виконані/заархівовані молитвені потреби з MongoDB
+ * @returns {Promise<Array>}
+ */
+export async function readArchivedPrayers() {
+  try {
+    const collection = await getCollection(COLLECTIONS.PRAYERS);
+    const prayers = await collection.find({ archived: true }).toArray();
+    return prayers.map(({ _id, ...prayer }) => prayer);
+  } catch (err) {
+    logError("Помилка читання archived prayers з MongoDB", err);
+    return [];
+  }
+}
+
+/**
+ * Оновлює довільні поля молитви (НЕ видаляє запис)
+ * @param {number|string} prayerId
+ * @param {Object} fields
+ * @returns {Promise<Object|null>}
+ */
+export async function updatePrayerFields(prayerId, fields) {
+  try {
+    const collection = await getCollection(COLLECTIONS.PRAYERS);
+    const result = await collection.findOneAndUpdate(
+      { id: parseInt(prayerId) },
+      { $set: fields },
+      { returnDocument: "after" }
+    );
+    if (!result.value) return null;
+    const { _id, ...prayerData } = result.value;
+    return prayerData;
+  } catch (err) {
+    logError("Помилка оновлення prayer fields в MongoDB", err);
+    return null;
   }
 }
 

@@ -11,6 +11,7 @@ import { findMemberById } from "../services/storage.js";
  */
 export async function createMainMenu(ctx = null) {
   let isRegistered = false;
+  const isAdminUser = !!(ctx && ctx.from && typeof ctx.from.id === "number" && isAdmin(ctx.from.id));
   
   if (ctx && ctx.from && ctx.from.id) {
     try {
@@ -24,12 +25,71 @@ export async function createMainMenu(ctx = null) {
   
   const dynamicButton = isRegistered ? "👤 Мій профіль" : "📝 Зареєструватися";
   
-  return Markup.keyboard([
+  const rows = [
     ["🙏 Попросити допомогу", "📖 Біблія та духовна підтримка"],
-    ["📞 Зв'язатися з нами", dynamicButton]
+    ["📞 Зв'язатися з нами", dynamicButton],
+  ];
+
+  // Додаткове меню для адміна
+  if (isAdminUser) {
+    rows.push(["🛠️ Керувати потребами"]);
+  }
+
+  return Markup.keyboard(rows)
+    .resize()
+    .persistent();
+}
+
+/**
+ * Меню для адміна: керування потребами
+ */
+export function createAdminManageNeedsMenu() {
+  return Markup.keyboard([
+    ["🆘 Потреби на допомогу"],
+    ["🙏 Молитовні потреби"],
+    ["📦 Показати виконані (архів)"],
+    ["🏠 Повернутися на головне меню"],
   ])
     .resize()
     .persistent();
+}
+
+/**
+ * Меню архіву для адміна
+ */
+export function createAdminArchiveMenu() {
+  return Markup.keyboard([
+    ["🆘 Виконані заявки"],
+    ["🙏 Виконані молитви"],
+    ["🛠️ Керувати потребами"],
+    ["🏠 Повернутися на головне меню"],
+  ])
+    .resize()
+    .persistent();
+}
+
+/**
+ * Відкрити меню архіву (тільки для адмінів)
+ */
+export async function handleAdminArchiveMenu(ctx) {
+  if (!isAdmin(ctx.from.id)) {
+    const menu = await createMainMenu(ctx);
+    return ctx.reply("⚠️ Ця функція доступна лише для служителів.", menu);
+  }
+
+  return ctx.reply("📦 Архів (виконані)\n\nОберіть розділ:", createAdminArchiveMenu());
+}
+
+/**
+ * Відкрити меню керування потребами (тільки для адмінів)
+ */
+export async function handleAdminManageNeedsMenu(ctx) {
+  if (!isAdmin(ctx.from.id)) {
+    const menu = await createMainMenu(ctx);
+    return ctx.reply("⚠️ Ця функція доступна лише для служителів.", menu);
+  }
+
+  return ctx.reply("🛠️ Керування потребами\n\nОберіть розділ:", createAdminManageNeedsMenu());
 }
 
 /**

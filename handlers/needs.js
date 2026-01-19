@@ -1,6 +1,6 @@
 // Обробник заявок на допомогу
 import { Markup } from "telegraf";
-import { readNeeds, addNeed, findMemberById, findNeedById, updateNeedStatus } from "../services/storage.js";
+import { readNeeds, readActiveNeeds, readArchivedNeeds, addNeed, findMemberById, findNeedById, updateNeedStatus, updateNeedFields } from "../services/storage.js";
 import { createMainMenu } from "./commands.js";
 import { isAdmin } from "../middlewares/admin.js";
 import { ADMIN_IDS, STATUS_MAP, NEED_STATUS } from "../config/constants.js";
@@ -124,6 +124,143 @@ export async function handleNeedsShowChat(ctx) {
 }
 
 /**
+ * Адмін: показати активні заявки на допомогу з меню керування
+ * (кожна заявка з 3 inline-кнопками під повідомленням)
+ */
+export async function handleAdminNeedsManageList(ctx) {
+  if (!isAdmin(ctx.from?.id)) {
+    const menu = await createMainMenu(ctx);
+    return ctx.reply("⚠️ Ця функція доступна лише для служителів.", menu);
+  }
+
+  const needs = await readActiveNeeds();
+  if (needs.length === 0) {
+    return ctx.reply("📭 Немає активних заявок на допомогу.");
+  }
+
+  await ctx.reply(`🆘 Активні заявки на допомогу: ${needs.length}`);
+
+  for (const need of needs) {
+    const message = formatNeedMessage(need);
+    await ctx.replyWithMarkdown(
+      message,
+      Markup.inlineKeyboard([
+        [
+          Markup.button.callback("💬 Відповісти", `reply_need_${need.id}`),
+        ],
+        [
+          Markup.button.callback("✅ Виконано", `need_done_${need.id}`),
+          Markup.button.callback("⏳ В процесі", `need_progress_${need.id}`),
+        ],
+      ])
+    );
+  }
+}
+
+/**
+ * Адмін: показати архівні (виконані) заявки на допомогу
+ */
+export async function handleAdminNeedsArchiveList(ctx) {
+  if (!isAdmin(ctx.from?.id)) {
+    const menu = await createMainMenu(ctx);
+    return ctx.reply("⚠️ Ця функція доступна лише для служителів.", menu);
+  }
+
+  const needs = await readArchivedNeeds();
+  if (needs.length === 0) {
+    return ctx.reply("📦 Архів порожній: немає виконаних заявок.");
+  }
+
+  // Найновіші зверху
+  needs.sort((a, b) => (b.doneAt || b.date || "").localeCompare(a.doneAt || a.date || ""));
+
+  await ctx.reply(`📦 Виконані заявки: ${needs.length}`);
+
+  // Щоб не засмічувати чат — показуємо максимум 50
+  const slice = needs.slice(0, 50);
+  for (const need of slice) {
+    const doneLine = need.doneAt ? `\n✅ *Виконано:* ${need.doneAt}` : "";
+    await ctx.replyWithMarkdown(formatNeedMessage(need) + doneLine);
+  }
+
+  if (needs.length > slice.length) {
+    await ctx.reply(`ℹ️ Показано ${slice.length} з ${needs.length}.`);
+  }
+}
+
+/**
+ * Адмін: позначити заявку як "в процесі" + повідомити користувача
+ */
+export async function handleAdminNeedMarkProgress(ctx) {
+  const needId = parseInt(ctx.match[1]);
+  const need = await findNeedById(needId);
+  if (!need) {
+    return ctx.answerCbQuery("⚠️ Заявка не знайдена");
+  }
+
+  // Оновлюємо статус у БД
+  const updated = await updateNeedStatus(needId, NEED_STATUS.WAITING);
+  await ctx.answerCbQuery("⏳ Позначено: в процесі");
+
+  // Повідомляємо користувача
+  try {
+    await ctx.telegram.sendMessage(
+      need.userId,
+      "⏳ Ваша заявка на допомогу взята в роботу. Ми вже працюємо над цим 🙏"
+    );
+  } catch (err) {
+    // якщо користувач заблокував бота — просто мовчки
+  }
+
+  // Оновлюємо повідомлення у чаті адміна
+  try {
+    const msg = formatNeedMessage(updated || need);
+    await ctx.editMessageText(msg, {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "💬 Відповісти", callback_data: `reply_need_${needId}` }],
+          [
+            { text: "✅ Виконано", callback_data: `need_done_${needId}` },
+            { text: "⏳ В процесі", callback_data: `need_progress_${needId}` },
+          ],
+        ],
+      },
+    });
+  } catch (err) {
+    // ignore
+  }
+}
+
+/**
+ * Адмін: позначити заявку як виконану і прибрати зі списку Telegram
+ * ВАЖЛИВО: запис НЕ видаляємо з MongoDB — ставимо archived=true
+ */
+export async function handleAdminNeedMarkDone(ctx) {
+  const needId = parseInt(ctx.match[1]);
+  const need = await findNeedById(needId);
+  if (!need) {
+    return ctx.answerCbQuery("⚠️ Заявка не знайдена");
+  }
+
+  const updated = await updateNeedFields(needId, {
+    status: NEED_STATUS.DONE,
+    archived: true,
+    doneAt: new Date().toISOString(),
+  });
+
+  await ctx.answerCbQuery("✅ Позначено: виконано");
+
+  // Прибираємо кнопки під повідомленням, щоб "зникло зі списку"
+  try {
+    const msg = formatNeedMessage(updated || need) + "\n\n✅ *Виконано*";
+    await ctx.editMessageText(msg, { parse_mode: "Markdown" });
+  } catch (err) {
+    // ignore
+  }
+}
+
+/**
  * Генерує та надсилає Excel файл з заявками
  */
 export async function handleNeedsShowExcel(ctx) {
@@ -233,14 +370,6 @@ export async function handleNeedSteps(ctx, msg) {
 /**
  * Створює меню для адміна при отриманні заявки на допомогу (без ID в тексті)
  */
-function createAdminNeedMenu() {
-  return Markup.keyboard([
-    ["💬 Написати відповідь"]
-  ])
-    .resize()
-    .persistent();
-}
-
 /**
  * Надсилає повідомлення адмінам про нову заявку
  */
@@ -248,22 +377,15 @@ async function notifyAdmins(ctx, need) {
   const adminMessage = createAdminNotification(need);
   console.log("🟢 Надсилаю повідомлення адмінам:", ADMIN_IDS);
 
-  // Використовуємо reply keyboard меню замість inline кнопок
-  const replyKeyboard = createAdminNeedMenu();
-
   for (const adminId of ADMIN_IDS) {
     try {
-      // Відправляємо повідомлення адміну
+      // ВАЖЛИВО: не показуємо кнопку "Написати відповідь" при надходженні нової заявки.
+      // Адмін керує заявками через "🛠️ Керувати потребами".
+      const menu = await createMainMenu({ from: { id: adminId } });
       await ctx.telegram.sendMessage(adminId, adminMessage, {
         parse_mode: "Markdown",
-        reply_markup: replyKeyboard.reply_markup,
+        reply_markup: menu.reply_markup,
       });
-      
-      // Зберігаємо needId в сесії адміна
-      if (!global.adminNeedSessions) {
-        global.adminNeedSessions = new Map();
-      }
-      global.adminNeedSessions.set(adminId, need.id);
     } catch (err) {
       console.error("❌ Помилка надсилання адміну:", err);
     }

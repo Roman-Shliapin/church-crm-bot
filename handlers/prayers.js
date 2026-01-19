@@ -1,12 +1,13 @@
 // Обробник молитвенних потреб
 import { Markup } from "telegraf";
-import { readPrayers, addPrayer, findMemberById, findPrayerById, updatePrayerClarification } from "../services/storage.js";
+import { readPrayers, readActivePrayers, readArchivedPrayers, addPrayer, findMemberById, findPrayerById, updatePrayerClarification, updatePrayerFields } from "../services/storage.js";
 import { getCollection } from "../services/database.js";
 import { createMainMenu } from "./commands.js";
 import { formatPrayerMessage, createPrayer, createAdminPrayerNotification } from "../utils/helpers.js";
 import { ADMIN_IDS } from "../config/constants.js";
 import { sanitizeText } from "../utils/validation.js";
 import { generatePrayersExcel, deleteFile } from "../services/excel.js";
+import { isAdmin } from "../middlewares/admin.js";
 
 /**
  * Обробник команди /pray - додати молитвенну потребу
@@ -82,6 +83,141 @@ export async function handlePrayersShowExcel(ctx) {
   } catch (err) {
     console.error("Помилка генерації Excel:", err);
     await ctx.reply("⚠️ Не вдалося згенерувати Excel файл.");
+  }
+}
+
+/**
+ * Адмін: показати активні молитвені потреби з меню керування
+ * (кожна потреба з 3 inline-кнопками під повідомленням)
+ */
+export async function handleAdminPrayersManageList(ctx) {
+  if (!isAdmin(ctx.from?.id)) {
+    const menu = await createMainMenu(ctx);
+    return ctx.reply("⚠️ Ця функція доступна лише для служителів.", menu);
+  }
+
+  const prayers = await readActivePrayers();
+  if (prayers.length === 0) {
+    return ctx.reply("📭 Немає активних молитвенних потреб.");
+  }
+
+  await ctx.reply(`🙏 Активні молитвені потреби: ${prayers.length}`);
+
+  for (const prayer of prayers) {
+    const base = formatPrayerMessage(prayer);
+    const statusLine = prayer.status ? `\n⚙️ *Статус:* ${prayer.status}` : "";
+    const message = base + statusLine;
+    await ctx.replyWithMarkdown(
+      message,
+      Markup.inlineKeyboard([
+        [Markup.button.callback("💬 Відповісти", `reply_prayer_${prayer.id}`)],
+        [
+          Markup.button.callback("✅ Виконано", `prayer_done_${prayer.id}`),
+          Markup.button.callback("⏳ В процесі", `prayer_progress_${prayer.id}`),
+        ],
+      ])
+    );
+  }
+}
+
+/**
+ * Адмін: показати архівні (виконані) молитвені потреби
+ */
+export async function handleAdminPrayersArchiveList(ctx) {
+  if (!isAdmin(ctx.from?.id)) {
+    const menu = await createMainMenu(ctx);
+    return ctx.reply("⚠️ Ця функція доступна лише для служителів.", menu);
+  }
+
+  const prayers = await readArchivedPrayers();
+  if (prayers.length === 0) {
+    return ctx.reply("📦 Архів порожній: немає виконаних молитвенних потреб.");
+  }
+
+  prayers.sort((a, b) => (b.doneAt || b.date || "").localeCompare(a.doneAt || a.date || ""));
+
+  await ctx.reply(`📦 Виконані молитвені потреби: ${prayers.length}`);
+
+  const slice = prayers.slice(0, 50);
+  for (const prayer of slice) {
+    const base = formatPrayerMessage(prayer);
+    const statusLine = `\n⚙️ *Статус:* ${prayer.status || "виконано"}`;
+    const doneLine = prayer.doneAt ? `\n✅ *Виконано:* ${prayer.doneAt}` : "";
+    await ctx.replyWithMarkdown(base + statusLine + doneLine);
+  }
+
+  if (prayers.length > slice.length) {
+    await ctx.reply(`ℹ️ Показано ${slice.length} з ${prayers.length}.`);
+  }
+}
+
+/**
+ * Адмін: позначити молитву як "в процесі" + повідомити користувача
+ */
+export async function handleAdminPrayerMarkProgress(ctx) {
+  const prayerId = parseInt(ctx.match[1]);
+  const prayer = await findPrayerById(prayerId);
+  if (!prayer) {
+    return ctx.answerCbQuery("⚠️ Молитвенна потреба не знайдена");
+  }
+
+  const updated = await updatePrayerFields(prayerId, { status: "в процесі" });
+  await ctx.answerCbQuery("⏳ Позначено: в процесі");
+
+  try {
+    await ctx.telegram.sendMessage(
+      prayer.userId,
+      "⏳ Вашу молитвенну потребу взято в роботу. Ми молимося і будемо з вами на звʼязку 🙏"
+    );
+  } catch (err) {
+    // ignore
+  }
+
+  try {
+    const base = formatPrayerMessage(updated || prayer);
+    const statusLine = `\n⚙️ *Статус:* ${(updated || prayer).status || "в процесі"}`;
+    await ctx.editMessageText(base + statusLine, {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "💬 Відповісти", callback_data: `reply_prayer_${prayerId}` }],
+          [
+            { text: "✅ Виконано", callback_data: `prayer_done_${prayerId}` },
+            { text: "⏳ В процесі", callback_data: `prayer_progress_${prayerId}` },
+          ],
+        ],
+      },
+    });
+  } catch (err) {
+    // ignore
+  }
+}
+
+/**
+ * Адмін: позначити молитву як виконану і прибрати зі списку Telegram
+ * ВАЖЛИВО: запис НЕ видаляємо з MongoDB — ставимо archived=true
+ */
+export async function handleAdminPrayerMarkDone(ctx) {
+  const prayerId = parseInt(ctx.match[1]);
+  const prayer = await findPrayerById(prayerId);
+  if (!prayer) {
+    return ctx.answerCbQuery("⚠️ Молитвенна потреба не знайдена");
+  }
+
+  const updated = await updatePrayerFields(prayerId, {
+    status: "виконано",
+    archived: true,
+    doneAt: new Date().toISOString(),
+  });
+
+  await ctx.answerCbQuery("✅ Позначено: виконано");
+
+  try {
+    const base = formatPrayerMessage(updated || prayer);
+    const statusLine = `\n⚙️ *Статус:* ${(updated || prayer).status || "виконано"}`;
+    await ctx.editMessageText(base + statusLine + "\n\n✅ *Виконано*", { parse_mode: "Markdown" });
+  } catch (err) {
+    // ignore
   }
 }
 
@@ -195,23 +331,15 @@ async function notifyAdmins(ctx, prayer) {
   const adminMessage = createAdminPrayerNotification(prayer);
   console.log("🟢 Надсилаю повідомлення адмінам про молитву:", ADMIN_IDS);
 
-  // Використовуємо reply keyboard меню замість inline кнопок
-  const replyKeyboard = createAdminPrayerMenu();
-
   for (const adminId of ADMIN_IDS) {
     try {
-      // Відправляємо повідомлення адміну
+      // ВАЖЛИВО: не показуємо кнопки/спец-меню при надходженні нової молитвенної потреби.
+      // Адмін керує потребами через "🛠️ Керувати потребами".
+      const menu = await createMainMenu({ from: { id: adminId } });
       await ctx.telegram.sendMessage(adminId, adminMessage, {
         parse_mode: "Markdown",
-        reply_markup: replyKeyboard.reply_markup,
+        reply_markup: menu.reply_markup,
       });
-      
-      // Зберігаємо prayerId в сесії адміна через окреме повідомлення (використовуємо bot instance)
-      // Або зберігаємо в глобальному об'єкті сесій
-      if (!global.adminPrayerSessions) {
-        global.adminPrayerSessions = new Map();
-      }
-      global.adminPrayerSessions.set(adminId, prayer.id);
     } catch (err) {
       console.error("❌ Помилка надсилання адміну:", err);
     }

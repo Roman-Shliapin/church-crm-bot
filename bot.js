@@ -6,12 +6,12 @@ import dotenv from "dotenv";
 dotenv.config();
 
 // Імпорт обробників команд
-import { handleStart, handleHelp, createMainMenu, handleBibleSupport } from "./handlers/commands.js";
+import { handleStart, handleHelp, createMainMenu, handleBibleSupport, handleAdminManageNeedsMenu, handleAdminArchiveMenu } from "./handlers/commands.js";
 import { handleRegisterStart, handleRegisterSteps, handleRegisterBaptismStatus } from "./handlers/register.js";
 import { handleMe, handleMembers, handleMembersShowChat, handleMembersShowExcel } from "./handlers/members.js";
 import { handleCandidates, handleCandidatesShowChat, handleCandidatesShowExcel } from "./handlers/candidates.js";
-import { handleNeedStart, handleNeedTypeSelection, handleNeedSteps, handleNeedsList, handleNeedsShowChat, handleNeedsShowExcel, handleNeedStatusChange, handleNeedReplyStart, handleNeedReplyText } from "./handlers/needs.js";
-import { handlePrayStart, handlePraySteps, handlePrayersList, handlePrayersShowChat, handlePrayersShowExcel, handlePrayClarifyStart, handlePrayClarifyText, handlePrayClarifyReplyStart, handlePrayClarifyReplyText, handlePrayReplyStart, handlePrayReplyText } from "./handlers/prayers.js";
+import { handleNeedStart, handleNeedTypeSelection, handleNeedSteps, handleNeedsList, handleNeedsShowChat, handleNeedsShowExcel, handleNeedStatusChange, handleNeedReplyStart, handleNeedReplyText, handleAdminNeedsManageList, handleAdminNeedsArchiveList, handleAdminNeedMarkDone, handleAdminNeedMarkProgress } from "./handlers/needs.js";
+import { handlePrayStart, handlePraySteps, handlePrayersList, handlePrayersShowChat, handlePrayersShowExcel, handlePrayClarifyStart, handlePrayClarifyText, handlePrayClarifyReplyStart, handlePrayClarifyReplyText, handlePrayReplyStart, handlePrayReplyText, handleAdminPrayersManageList, handleAdminPrayersArchiveList, handleAdminPrayerMarkDone, handleAdminPrayerMarkProgress } from "./handlers/prayers.js";
 import { readPrayers, readLiteratureRequests } from "./services/storage.js";
 import { handleLessons, handleLessonSelection, handleLessonCallback } from "./handlers/lessons.js";
 import { handleUploadLessonStart, handleUploadLessonName, handleUploadLessonFile } from "./handlers/lessonsAdmin.js";
@@ -121,6 +121,24 @@ bot.on("text", async (ctx, next) => {
   if (msg === "📖 Біблія та духовна підтримка") {
     return handleBibleSupport(ctx);
   }
+  if (msg === "🛠️ Керувати потребами") {
+    return handleAdminManageNeedsMenu(ctx);
+  }
+  if (msg === "🆘 Потреби на допомогу") {
+    return handleAdminNeedsManageList(ctx);
+  }
+  if (msg === "🙏 Молитовні потреби") {
+    return handleAdminPrayersManageList(ctx);
+  }
+  if (msg === "📦 Показати виконані (архів)") {
+    return handleAdminArchiveMenu(ctx);
+  }
+  if (msg === "🆘 Виконані заявки") {
+    return handleAdminNeedsArchiveList(ctx);
+  }
+  if (msg === "🙏 Виконані молитви") {
+    return handleAdminPrayersArchiveList(ctx);
+  }
   
   // Обробка кнопок з меню "Біблія та духовна підтримка"
   if (msg === "💬 Молитвенна потреба") {
@@ -138,7 +156,11 @@ bot.on("text", async (ctx, next) => {
   if (msg === "💬 Перейти в чат церкви") {
     return handleChurchChat(ctx);
   }
-  if (msg === "🏠 Вийти на головне меню" || msg === "🏠 Повернутися до головного меню") {
+  if (
+    msg === "🏠 Вийти на головне меню" ||
+    msg === "🏠 Повернутися до головного меню" ||
+    msg === "🏠 Повернутися на головне меню"
+  ) {
     return handleBackToMainMenu(ctx);
   }
 
@@ -228,10 +250,7 @@ bot.on("text", async (ctx, next) => {
     return handleBackToMainMenu(ctx);
   }
 
-  // Обробка кнопки адміна для заявок на допомогу (reply keyboard)
-  if (msg === "💬 Написати відповідь") {
-    return handleNeedReplyStart(ctx, msg);
-  }
+  // (Прибрано) Кнопка "💬 Написати відповідь" більше не показується при нових заявках.
 
   // Обробка кнопок адміна для запитів на літературу (reply keyboard)
   if (msg === "📚 Уточнити") {
@@ -290,6 +309,10 @@ bot.action(/status_(\d+)_(\w+)/, handleNeedStatusChange);
 // Відповідь на заявку (кнопка "Написати відповідь")
 bot.action(/reply_need_(\d+)/, checkAdmin, handleNeedReplyStart);
 
+// Керування заявками на допомогу (адмін)
+bot.action(/need_progress_(\d+)/, checkAdmin, handleAdminNeedMarkProgress);
+bot.action(/need_done_(\d+)/, checkAdmin, handleAdminNeedMarkDone);
+
 // Уточнення молитвенної потреби (кнопка "Уточнити")
 bot.action(/clarify_prayer_(\d+)/, checkAdmin, handlePrayClarifyStart);
 
@@ -298,6 +321,10 @@ bot.action(/clarify_prayer_(\d+)/, checkAdmin, handlePrayClarifyStart);
 
 // Відповідь адміна на молитву (кнопка "Відповісти" - остаточна відповідь)
 bot.action(/reply_prayer_(\d+)/, checkAdmin, handlePrayReplyStart);
+
+// Керування молитвенними потребами (адмін)
+bot.action(/prayer_progress_(\d+)/, checkAdmin, handleAdminPrayerMarkProgress);
+bot.action(/prayer_done_(\d+)/, checkAdmin, handleAdminPrayerMarkDone);
 
 // Уточнення запиту на літературу (кнопка "Уточнити")
 bot.action(/clarify_literature_(\d+)/, checkAdmin, handleLiteratureClarifyStart);
