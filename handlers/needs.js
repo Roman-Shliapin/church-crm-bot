@@ -1,6 +1,6 @@
 // Обробник заявок на допомогу
 import { Markup } from "telegraf";
-import { readNeeds, readActiveNeeds, readArchivedNeeds, addNeed, findMemberById, findNeedById, updateNeedStatus, updateNeedFields, deleteNeedById } from "../services/storage.js";
+import { readNeeds, readActiveNeeds, readArchivedNeeds, addNeed, findMemberById, findNeedById, updateNeedStatus, updateNeedFields, deleteNeedById, findLatestHumanitarianNeedByCategory } from "../services/storage.js";
 import { createMainMenu } from "./commands.js";
 import { isAdmin } from "../middlewares/admin.js";
 import { ADMIN_IDS, STATUS_MAP, NEED_STATUS } from "../config/constants.js";
@@ -128,6 +128,31 @@ export async function handleNeedHumanitarianCategorySelection(ctx, msg) {
   if (msg === "Продукти") description = "Продукти";
   if (msg === "Хімія") description = "Хімія";
   if (!description) return false;
+
+  // 25-денний ліміт: тільки для гуманітарної допомоги і окремо по категоріям "Продукти"/"Хімія"
+  const categoryKey = description === "Продукти" ? "products" : "chemistry";
+  const COOLDOWN_DAYS = 25;
+  const COOLDOWN_MS = COOLDOWN_DAYS * 24 * 60 * 60 * 1000;
+  const last = await findLatestHumanitarianNeedByCategory(ctx.from.id, categoryKey);
+  if (last) {
+    const lastTs =
+      (typeof last.createdAt === "string" && Date.parse(last.createdAt)) ||
+      (typeof last.id === "number" ? last.id : NaN);
+    if (!Number.isNaN(lastTs)) {
+      const diff = Date.now() - lastTs;
+      if (diff < COOLDOWN_MS) {
+        const remainingDays = Math.ceil((COOLDOWN_MS - diff) / (24 * 60 * 60 * 1000));
+        const menu = await createMainMenu(ctx);
+        ctx.session = null;
+        await ctx.reply(
+          `⛔ Ви вже подавали гуманітарну заявку (*${description}*) нещодавно.\n\n` +
+            `Можна подати наступну заявку цієї категорії через *${remainingDays}* дн.`,
+          { parse_mode: "Markdown", reply_markup: menu.reply_markup }
+        );
+        return true;
+      }
+    }
+  }
 
   ctx.session.data.description = description;
 

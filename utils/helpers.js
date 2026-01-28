@@ -51,6 +51,7 @@ export function createAdminNotification(need) {
  * @returns {Object} Об'єкт заявки
  */
 export function createNeed({ userId, name, baptism, phone, description, birthday, type = "other" }) {
+  const createdAt = new Date().toISOString();
   return {
     id: Date.now(),
     userId,
@@ -61,6 +62,7 @@ export function createNeed({ userId, name, baptism, phone, description, birthday
     description,
     type,
     date: new Date().toLocaleString("uk-UA"),
+    createdAt,
     status: "нове",
   };
 }

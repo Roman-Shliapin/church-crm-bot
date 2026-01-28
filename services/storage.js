@@ -324,6 +324,48 @@ export async function deleteNeedById(needId) {
 }
 
 /**
+ * Повертає останню гуманітарну заявку користувача в конкретній категорії ("products"|"chemistry")
+ * Категорія визначається по description (Продукти/Хімія та ключові слова).
+ * @param {number} userId
+ * @param {"products"|"chemistry"} categoryKey
+ * @returns {Promise<Object|null>}
+ */
+export async function findLatestHumanitarianNeedByCategory(userId, categoryKey) {
+  try {
+    const collection = await getCollection(COLLECTIONS.NEEDS);
+    const all = await collection
+      .find({ userId: parseInt(userId), type: "humanitarian" })
+      .toArray();
+
+    const needs = all.map(({ _id, ...need }) => need);
+    const descNorm = (s) => (s || "").toString().toLowerCase().trim();
+
+    const isProducts = (n) => {
+      const d = descNorm(n.description);
+      return d === "продукти" || d.includes("продукт") || d.includes("харч") || d.includes("їж");
+    };
+    const isChemistry = (n) => {
+      const d = descNorm(n.description);
+      return d === "хімія" || d.includes("хім") || d.includes("порош") || d.includes("миюч") || d.includes("мило");
+    };
+
+    const filtered =
+      categoryKey === "products"
+        ? needs.filter(isProducts)
+        : needs.filter(isChemistry);
+
+    if (filtered.length === 0) return null;
+
+    // id у нас = Date.now(), тому можна сортувати як timestamp
+    filtered.sort((a, b) => (b.id || 0) - (a.id || 0));
+    return filtered[0] || null;
+  } catch (err) {
+    logError("Помилка пошуку latest humanitarian need by category в MongoDB", err);
+    return null;
+  }
+}
+
+/**
  * Оновлює статус заявки
  * @param {number|string} needId - ID заявки
  * @param {string} newStatus - Новий статус
