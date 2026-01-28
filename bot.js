@@ -8,9 +8,9 @@ dotenv.config();
 // Імпорт обробників команд
 import { handleStart, handleHelp, createMainMenu, handleBibleSupport, handleAdminManageNeedsMenu, handleAdminArchiveMenu } from "./handlers/commands.js";
 import { handleRegisterStart, handleRegisterSteps, handleRegisterBaptismStatus } from "./handlers/register.js";
-import { handleMe, handleMembers, handleMembersShowChat, handleMembersShowExcel } from "./handlers/members.js";
+import { handleMe, handleMembers, handleMembersShowChat, handleMembersShowExcel, handleMemberMoveToCandidatesStart, handleMemberMoveToCandidatesConfirm, handleMemberMoveToCandidatesCancel } from "./handlers/members.js";
 import { handleCandidates, handleCandidatesShowChat, handleCandidatesShowExcel } from "./handlers/candidates.js";
-import { handleNeedStart, handleNeedTypeSelection, handleNeedHumanitarianCategorySelection, handleNeedSteps, handleNeedsList, handleNeedsShowChat, handleNeedsShowExcel, handleNeedStatusChange, handleNeedReplyStart, handleNeedReplyText, handleAdminNeedsManageList, handleAdminNeedsArchiveList, handleAdminNeedMarkDone, handleAdminNeedMarkProgress, handleAdminNeedDoneText, handleAdminNeedDelete, handleAdminNeedDeleteConfirm, handleAdminNeedDeleteCancel, handleAdminNeedsCategoryMenu, handleAdminNeedsCategoryShowChat, handleAdminNeedsCategoryShowPdf } from "./handlers/needs.js";
+import { handleNeedStart, handleNeedTypeSelection, handleNeedHumanitarianCategorySelection, handleNeedSteps, handleNeedsList, handleNeedsShowChat, handleNeedsShowExcel, handleNeedStatusChange, handleNeedReplyStart, handleNeedReplyText, handleAdminNeedsManageList, handleAdminNeedsArchiveList, handleAdminNeedMarkDone, handleAdminNeedMarkProgress, handleAdminNeedDoneText, handleAdminNeedDelete, handleAdminNeedDeleteConfirm, handleAdminNeedDeleteCancel, handleAdminNeedsCategoryMenu, handleAdminNeedsCategoryShowChat, handleAdminNeedsCategoryShowPdf, handleAdminNeedsArchiveCategoryMenu, handleAdminNeedsArchiveCategoryShowChat, handleAdminNeedsArchiveCategoryShowPdf } from "./handlers/needs.js";
 import { handlePrayStart, handlePraySteps, handlePrayersList, handlePrayersShowChat, handlePrayersShowExcel, handlePrayClarifyStart, handlePrayClarifyText, handlePrayClarifyReplyStart, handlePrayClarifyReplyText, handlePrayReplyStart, handlePrayReplyText, handleAdminPrayersManageList, handleAdminPrayersArchiveList, handleAdminPrayerMarkDone, handleAdminPrayerMarkProgress, handleAdminPrayerDoneText, handleAdminPrayerDelete, handleAdminPrayerDeleteConfirm, handleAdminPrayerDeleteCancel } from "./handlers/prayers.js";
 import { readPrayers, readLiteratureRequests } from "./services/storage.js";
 import { handleLessons, handleLessonSelection, handleLessonCallback } from "./handlers/lessons.js";
@@ -144,7 +144,17 @@ bot.on("text", async (ctx, next) => {
     return handleAdminArchiveMenu(ctx);
   }
   if (msg === "🆘 Виконані заявки") {
+    // legacy (залишаємо)
     return handleAdminNeedsArchiveList(ctx);
+  }
+  if (msg === "🥫 Виконані продукти") {
+    return handleAdminNeedsArchiveCategoryMenu(ctx, "products");
+  }
+  if (msg === "🧴 Виконана хімія") {
+    return handleAdminNeedsArchiveCategoryMenu(ctx, "chemistry");
+  }
+  if (msg === "💬 Виконані інше") {
+    return handleAdminNeedsArchiveCategoryMenu(ctx, "other");
   }
   if (msg === "🙏 Виконані молитви") {
     return handleAdminPrayersArchiveList(ctx);
@@ -342,6 +352,8 @@ bot.action(/need_delete_confirm_(\d+)/, checkAdmin, handleAdminNeedDeleteConfirm
 bot.action(/need_delete_cancel_(\d+)/, checkAdmin, handleAdminNeedDeleteCancel);
 bot.action(/needs_cat_(products|chemistry|other)_chat/, checkAdmin, handleAdminNeedsCategoryShowChat);
 bot.action(/needs_cat_(products|chemistry|other)_pdf/, checkAdmin, handleAdminNeedsCategoryShowPdf);
+bot.action(/needs_arch_cat_(products|chemistry|other)_chat/, checkAdmin, handleAdminNeedsArchiveCategoryShowChat);
+bot.action(/needs_arch_cat_(products|chemistry|other)_pdf/, checkAdmin, handleAdminNeedsArchiveCategoryShowPdf);
 
 // Уточнення молитвенної потреби (кнопка "Уточнити")
 bot.action(/clarify_prayer_(\d+)/, checkAdmin, handlePrayClarifyStart);
@@ -382,6 +394,11 @@ bot.action("prayers_show_excel", handlePrayersShowExcel);
 // Вибір формату для списку членів
 bot.action("members_show_chat", handleMembersShowChat);
 bot.action("members_show_excel", handleMembersShowExcel);
+
+// Переміщення members -> candidates (тільки для адмінів, з підтвердженням)
+bot.action(/member_to_candidate_(\d+)/, checkAdmin, handleMemberMoveToCandidatesStart);
+bot.action(/member_to_candidate_confirm_(\d+)/, checkAdmin, handleMemberMoveToCandidatesConfirm);
+bot.action(/member_to_candidate_cancel_(\d+)/, checkAdmin, handleMemberMoveToCandidatesCancel);
 
 // Вибір формату для списку нехрещених
 bot.action("candidates_show_chat", handleCandidatesShowChat);

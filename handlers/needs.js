@@ -1,6 +1,6 @@
 // Обробник заявок на допомогу
 import { Markup } from "telegraf";
-import { readNeeds, readActiveNeeds, readArchivedNeeds, addNeed, findMemberById, findNeedById, updateNeedStatus, updateNeedFields, deleteNeedById, findLatestHumanitarianNeedByCategory } from "../services/storage.js";
+import { readNeeds, readActiveNeeds, readArchivedNeeds, addNeed, addMember, findMemberById, findNeedById, updateNeedStatus, updateNeedFields, deleteNeedById, findLatestHumanitarianNeedByCategory } from "../services/storage.js";
 import { createMainMenu } from "./commands.js";
 import { isAdmin } from "../middlewares/admin.js";
 import { ADMIN_IDS, STATUS_MAP, NEED_STATUS } from "../config/constants.js";
@@ -50,6 +50,10 @@ export function createNeedTypeMenu() {
 export function createHumanitarianCategoryMenu() {
   // Вимога: тільки 2 кнопки
   return Markup.keyboard([["Продукти", "Хімія"]]).resize().persistent();
+}
+
+export function createGuestRegistrationConfirmMenu() {
+  return Markup.keyboard([["Так", "Ні"]]).resize().persistent();
 }
 
 /**
@@ -459,6 +463,72 @@ export async function handleNeedSteps(ctx, msg) {
     return false; // Не наш крок
   }
 
+  // === ПІДТВЕРДЖЕННЯ РЕЄСТРАЦІЇ ДЛЯ ГОСТЯ (інакше заявку анулюємо) ===
+  if (step === "need_guest_confirm_registration") {
+    const lower = (msg || "").toString().trim().toLowerCase();
+    const yes = lower === "так" || lower === "✅ так" || lower === "yes";
+    const no = lower === "ні" || lower === "нi" || lower === "нет" || lower === "no" || lower === "❌ ні";
+
+    if (!yes && !no) {
+      await ctx.reply("Будь ласка, оберіть: Так або Ні", createGuestRegistrationConfirmMenu());
+      return true;
+    }
+
+    if (no) {
+      const menu = await createMainMenu(ctx);
+      ctx.session = null;
+      await ctx.reply("❌ Заявку анульовано (реєстрацію не підтверджено).", menu);
+      return true;
+    }
+
+    // yes: реєструємо як кандидата (нехрещеного) і створюємо заявку
+    const data = ctx.session.data || {};
+    const userId = ctx.from.id;
+
+    try {
+      // якщо раптом вже зареєстрований — не падаємо
+      const existing = await findMemberById(userId);
+      if (!existing) {
+        await addMember({
+          id: userId,
+          name: data.name,
+          phone: data.phone,
+          birthday: data.birthday,
+          baptized: false,
+          baptism: null,
+          registeredAt: new Date().toISOString(),
+        });
+      }
+    } catch (err) {
+      // якщо дубль — просто продовжуємо (заявка важливіша)
+    }
+
+    try {
+      const need = createNeed({
+        userId,
+        name: data.name,
+        baptism: "Не член церкви",
+        birthday: data.birthday,
+        phone: data.phone,
+        description: data.description,
+        type: data.needType || "other",
+      });
+
+      await addNeed(need);
+      await notifyAdmins(ctx, need);
+
+      const menu = await createMainMenu(ctx);
+      ctx.session = null;
+      await ctx.reply("✅ Дякуємо! Реєстрацію підтверджено, заявку збережено 🙏", menu);
+      return true;
+    } catch (err) {
+      const menu = await createMainMenu(ctx);
+      ctx.session = null;
+      await ctx.reply("⚠️ Не вдалося зберегти заявку. Спробуйте ще раз.", menu);
+      return true;
+    }
+  }
+
   // === ЗАЯВКА ОТ ГОСТЯ (НЕ ЧЛЕНА ЦЕРКВИ) ===
   if (step === "need_guest_fullname" || step === "need_guest_name") {
     const validatedName = validateName(msg);
@@ -494,22 +564,14 @@ export async function handleNeedSteps(ctx, msg) {
 
     // Якщо це гуманітарна допомога — опис вже обрано (Продукти/Хімія), більше нічого не питаємо
     if (ctx.session.data.needType === "humanitarian" && ctx.session.data.description) {
-      const userData = ctx.session.data;
-      const need = createNeed({
-        userId: ctx.from.id,
-        name: userData.name,
-        baptism: "Не член церкви",
-        birthday: userData.birthday,
-        phone: userData.phone,
-        description: userData.description,
-        type: "humanitarian",
-      });
-
-      await addNeed(need);
-      const menu = await createMainMenu(ctx);
-      await ctx.reply("✅ Дякуємо! Заявку збережено. Ми з вами зв'яжемось 🙏", menu);
-      await notifyAdmins(ctx, need);
-      ctx.session = null;
+      // Підтвердження реєстрації перед збереженням заявки
+      ctx.session.step = "need_guest_confirm_registration";
+      await ctx.reply(
+        "✅ Дані отримано.\n\n" +
+          "Підтвердіть, будь ласка, реєстрацію.\n" +
+          "Якщо ви не підтвердите — заявка буде *анульована*.",
+        { parse_mode: "Markdown", reply_markup: createGuestRegistrationConfirmMenu().reply_markup }
+      );
       return true;
     }
 
@@ -525,24 +587,16 @@ export async function handleNeedSteps(ctx, msg) {
       ctx.reply("⚠️ Опис не може бути порожнім або перевищувати 5000 символів.");
       return true;
     }
-    const userData = ctx.session.data;
-    const need = createNeed({
-      userId: ctx.from.id,
-      name: userData.name,
-      baptism: "Не член церкви",
-      birthday: userData.birthday,
-      phone: userData.phone,
-      description: sanitizedDescription,
-      type: ctx.session.data.needType || "other",
-    });
 
-    await addNeed(need);
-    const menu = await createMainMenu(ctx);
-    await ctx.reply("✅ Дякуємо! Ваша заявка збережена. Ми з вами зв'яжемось 🙏", menu);
-
-    // Повідомлення адмінам
-    await notifyAdmins(ctx, need);
-    ctx.session = null;
+    // Зберігаємо опис у сесії і просимо підтвердження реєстрації
+    ctx.session.data.description = sanitizedDescription;
+    ctx.session.step = "need_guest_confirm_registration";
+    await ctx.reply(
+      "✅ Дані отримано.\n\n" +
+        "Підтвердіть, будь ласка, реєстрацію.\n" +
+        "Якщо ви не підтвердите — заявка буде *анульована*.",
+      { parse_mode: "Markdown", reply_markup: createGuestRegistrationConfirmMenu().reply_markup }
+    );
     return true;
   }
 
@@ -1022,6 +1076,94 @@ export async function handleAdminNeedsCategoryShowPdf(ctx) {
     await ctx.replyWithDocument({ source: buffer, filename });
   } catch (err) {
     console.error("Помилка генерації PDF:", err);
+    await ctx.reply("⚠️ Не вдалося згенерувати PDF. Спробуйте ще раз.");
+  }
+}
+
+// ==================== АРХІВ: РОЗДІЛЕННЯ НА 3 СПИСКИ + CHAT/PDF ====================
+
+export async function handleAdminNeedsArchiveCategoryMenu(ctx, categoryKey) {
+  if (!isAdmin(ctx.from?.id)) {
+    const menu = await createMainMenu(ctx);
+    return ctx.reply("⚠️ Ця функція доступна лише для служителів.", menu);
+  }
+
+  const label = getCategoryLabel(categoryKey);
+  return ctx.reply(`📦 Архів: *${label}*\n\nОберіть дію:`, {
+    parse_mode: "Markdown",
+    reply_markup: Markup.inlineKeyboard([
+      [
+        Markup.button.callback("💬 Показати в чаті", `needs_arch_cat_${categoryKey}_chat`),
+        Markup.button.callback("📄 PDF таблиця", `needs_arch_cat_${categoryKey}_pdf`),
+      ],
+    ]).reply_markup,
+  });
+}
+
+export async function handleAdminNeedsArchiveCategoryShowChat(ctx) {
+  const categoryKey = ctx.match[1];
+  const label = getCategoryLabel(categoryKey);
+
+  await ctx.answerCbQuery("Показую...");
+  const needs = await readArchivedNeeds();
+  const filtered = needs.filter((n) => classifyNeedCategory(n) === categoryKey);
+
+  if (filtered.length === 0) {
+    return ctx.reply(`📦 Архів порожній для категорії: ${label}`);
+  }
+
+  // Найновіші зверху
+  filtered.sort((a, b) => (b.doneAt || b.date || "").localeCompare(a.doneAt || a.date || ""));
+
+  await ctx.reply(`📦 Виконані заявки (${label}): ${filtered.length}`);
+
+  const slice = filtered.slice(0, 50);
+  for (const need of slice) {
+    const doneLine = need.doneAt ? `\n✅ *Виконано:* ${need.doneAt}` : "";
+    await ctx.replyWithMarkdown(formatNeedMessage(need) + doneLine);
+  }
+
+  if (filtered.length > slice.length) {
+    await ctx.reply(`ℹ️ Показано ${slice.length} з ${filtered.length}.`);
+  }
+}
+
+export async function handleAdminNeedsArchiveCategoryShowPdf(ctx) {
+  const categoryKey = ctx.match[1];
+  const label = getCategoryLabel(categoryKey);
+
+  try {
+    await ctx.answerCbQuery("Генерую PDF...");
+  } catch (err) {
+    // ignore
+  }
+
+  try {
+    const needs = await readArchivedNeeds();
+    const filtered = needs.filter((n) => classifyNeedCategory(n) === categoryKey);
+
+    const rows = filtered.map((n) => {
+      return {
+        name: n.name,
+        birthday: n.birthday,
+        phone: n.phone,
+        categoryLabel: label,
+        statusLabel: "виконано",
+        statusDate: n.doneAt || "—",
+      };
+    });
+
+    const title = `Таблиця потреб (архів): ${label}`;
+    const buffer = await generateNeedsPdfBuffer({ title, needs: rows });
+    const filename = `needs-archive-${categoryKey}-${new Date().toISOString().slice(0, 10)}.pdf`;
+
+    if (!buffer || buffer.length === 0) {
+      return ctx.reply("⚠️ Не вдалося згенерувати PDF (порожній файл). Спробуйте ще раз.");
+    }
+
+    await ctx.replyWithDocument({ source: buffer, filename });
+  } catch (err) {
+    console.error("Помилка генерації PDF (архів):", err);
     await ctx.reply("⚠️ Не вдалося згенерувати PDF. Спробуйте ще раз.");
   }
 }

@@ -170,6 +170,42 @@ export async function addMember(user) {
   }
 }
 
+/**
+ * Переміщує користувача з members -> candidates (тільки в цей бік)
+ * @param {number} userId - Telegram ID користувача
+ * @returns {Promise<{ok: boolean, reason?: string}>}
+ */
+export async function moveMemberToCandidates(userId) {
+  try {
+    const id = parseInt(userId, 10);
+    if (!id) return { ok: false, reason: "invalid_id" };
+
+    const membersCollection = await getCollection(COLLECTIONS.MEMBERS);
+    const candidatesCollection = await getCollection(COLLECTIONS.CANDIDATES);
+
+    const member = await membersCollection.findOne({ id });
+    if (!member) return { ok: false, reason: "not_found" };
+
+    const existingCandidate = await candidatesCollection.findOne({ id });
+    if (!existingCandidate) {
+      const { _id, ...memberData } = member;
+      const candidateDoc = {
+        ...memberData,
+        baptized: false,
+        baptism: null,
+        movedToCandidatesAt: new Date().toISOString(),
+      };
+      await candidatesCollection.insertOne(candidateDoc);
+    }
+
+    await membersCollection.deleteOne({ id });
+    return { ok: true };
+  } catch (err) {
+    logError("Помилка переміщення member -> candidates в MongoDB", err);
+    return { ok: false, reason: "error" };
+  }
+}
+
 // ==================== КАНДИДАТИ (НЕХРЕЩЕНІ) ====================
 
 /**
