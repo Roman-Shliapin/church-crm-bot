@@ -10,8 +10,8 @@ import { handleStart, handleHelp, createMainMenu, handleBibleSupport, handleAdmi
 import { handleRegisterStart, handleRegisterSteps, handleRegisterBaptismStatus } from "./handlers/register.js";
 import { handleMe, handleMembers, handleMembersShowChat, handleMembersShowExcel } from "./handlers/members.js";
 import { handleCandidates, handleCandidatesShowChat, handleCandidatesShowExcel } from "./handlers/candidates.js";
-import { handleNeedStart, handleNeedTypeSelection, handleNeedSteps, handleNeedsList, handleNeedsShowChat, handleNeedsShowExcel, handleNeedStatusChange, handleNeedReplyStart, handleNeedReplyText, handleAdminNeedsManageList, handleAdminNeedsArchiveList, handleAdminNeedMarkDone, handleAdminNeedMarkProgress, handleAdminNeedDoneText } from "./handlers/needs.js";
-import { handlePrayStart, handlePraySteps, handlePrayersList, handlePrayersShowChat, handlePrayersShowExcel, handlePrayClarifyStart, handlePrayClarifyText, handlePrayClarifyReplyStart, handlePrayClarifyReplyText, handlePrayReplyStart, handlePrayReplyText, handleAdminPrayersManageList, handleAdminPrayersArchiveList, handleAdminPrayerMarkDone, handleAdminPrayerMarkProgress, handleAdminPrayerDoneText } from "./handlers/prayers.js";
+import { handleNeedStart, handleNeedTypeSelection, handleNeedHumanitarianCategorySelection, handleNeedSteps, handleNeedsList, handleNeedsShowChat, handleNeedsShowExcel, handleNeedStatusChange, handleNeedReplyStart, handleNeedReplyText, handleAdminNeedsManageList, handleAdminNeedsArchiveList, handleAdminNeedMarkDone, handleAdminNeedMarkProgress, handleAdminNeedDoneText, handleAdminNeedDelete, handleAdminNeedDeleteConfirm, handleAdminNeedDeleteCancel, handleAdminNeedsCategoryMenu, handleAdminNeedsCategoryShowChat, handleAdminNeedsCategoryShowPdf } from "./handlers/needs.js";
+import { handlePrayStart, handlePraySteps, handlePrayersList, handlePrayersShowChat, handlePrayersShowExcel, handlePrayClarifyStart, handlePrayClarifyText, handlePrayClarifyReplyStart, handlePrayClarifyReplyText, handlePrayReplyStart, handlePrayReplyText, handleAdminPrayersManageList, handleAdminPrayersArchiveList, handleAdminPrayerMarkDone, handleAdminPrayerMarkProgress, handleAdminPrayerDoneText, handleAdminPrayerDelete, handleAdminPrayerDeleteConfirm, handleAdminPrayerDeleteCancel } from "./handlers/prayers.js";
 import { readPrayers, readLiteratureRequests } from "./services/storage.js";
 import { handleLessons, handleLessonSelection, handleLessonCallback } from "./handlers/lessons.js";
 import { handleUploadLessonStart, handleUploadLessonName, handleUploadLessonFile } from "./handlers/lessonsAdmin.js";
@@ -125,7 +125,17 @@ bot.on("text", async (ctx, next) => {
     return handleAdminManageNeedsMenu(ctx);
   }
   if (msg === "🆘 Потреби на допомогу") {
+    // старий пункт (залишаємо для сумісності)
     return handleAdminNeedsManageList(ctx);
+  }
+  if (msg === "🥫 Продукти") {
+    return handleAdminNeedsCategoryMenu(ctx, "products");
+  }
+  if (msg === "🧴 Хімія") {
+    return handleAdminNeedsCategoryMenu(ctx, "chemistry");
+  }
+  if (msg === "💬 Інше") {
+    return handleAdminNeedsCategoryMenu(ctx, "other");
   }
   if (msg === "🙏 Молитовні потреби") {
     return handleAdminPrayersManageList(ctx);
@@ -166,6 +176,11 @@ bot.on("text", async (ctx, next) => {
 
   // Обробка вибору типу допомоги (через reply keyboard)
   if (await handleNeedTypeSelection(ctx, msg)) {
+    return;
+  }
+
+  // Обробка вибору категорії гуманітарної допомоги (Продукти/Хімія)
+  if (await handleNeedHumanitarianCategorySelection(ctx, msg)) {
     return;
   }
   
@@ -322,6 +337,11 @@ bot.action(/reply_need_(\d+)/, checkAdmin, handleNeedReplyStart);
 // Керування заявками на допомогу (адмін)
 bot.action(/need_progress_(\d+)/, checkAdmin, handleAdminNeedMarkProgress);
 bot.action(/need_done_(\d+)/, checkAdmin, handleAdminNeedMarkDone);
+bot.action(/need_delete_(\d+)/, checkAdmin, handleAdminNeedDelete);
+bot.action(/need_delete_confirm_(\d+)/, checkAdmin, handleAdminNeedDeleteConfirm);
+bot.action(/need_delete_cancel_(\d+)/, checkAdmin, handleAdminNeedDeleteCancel);
+bot.action(/needs_cat_(products|chemistry|other)_chat/, checkAdmin, handleAdminNeedsCategoryShowChat);
+bot.action(/needs_cat_(products|chemistry|other)_pdf/, checkAdmin, handleAdminNeedsCategoryShowPdf);
 
 // Уточнення молитвенної потреби (кнопка "Уточнити")
 bot.action(/clarify_prayer_(\d+)/, checkAdmin, handlePrayClarifyStart);
@@ -335,6 +355,9 @@ bot.action(/reply_prayer_(\d+)/, checkAdmin, handlePrayReplyStart);
 // Керування молитвенними потребами (адмін)
 bot.action(/prayer_progress_(\d+)/, checkAdmin, handleAdminPrayerMarkProgress);
 bot.action(/prayer_done_(\d+)/, checkAdmin, handleAdminPrayerMarkDone);
+bot.action(/prayer_delete_(\d+)/, checkAdmin, handleAdminPrayerDelete);
+bot.action(/prayer_delete_confirm_(\d+)/, checkAdmin, handleAdminPrayerDeleteConfirm);
+bot.action(/prayer_delete_cancel_(\d+)/, checkAdmin, handleAdminPrayerDeleteCancel);
 
 // Уточнення запиту на літературу (кнопка "Уточнити")
 bot.action(/clarify_literature_(\d+)/, checkAdmin, handleLiteratureClarifyStart);

@@ -308,6 +308,22 @@ export async function findNeedById(needId) {
 }
 
 /**
+ * Видаляє заявку на допомогу з MongoDB назавжди (hard delete)
+ * @param {number|string} needId
+ * @returns {Promise<boolean>} true якщо видалено, інакше false
+ */
+export async function deleteNeedById(needId) {
+  try {
+    const collection = await getCollection(COLLECTIONS.NEEDS);
+    const result = await collection.deleteOne({ id: parseInt(needId) });
+    return result.deletedCount === 1;
+  } catch (err) {
+    logError("Помилка видалення need в MongoDB", err);
+    return false;
+  }
+}
+
+/**
  * Оновлює статус заявки
  * @param {number|string} needId - ID заявки
  * @param {string} newStatus - Новий статус
@@ -475,6 +491,22 @@ export async function findPrayerById(prayerId) {
   } catch (err) {
     logError("Помилка пошуку prayer в MongoDB", err);
     return null;
+  }
+}
+
+/**
+ * Видаляє молитвенну потребу з MongoDB назавжди (hard delete)
+ * @param {number|string} prayerId
+ * @returns {Promise<boolean>} true якщо видалено, інакше false
+ */
+export async function deletePrayerById(prayerId) {
+  try {
+    const collection = await getCollection(COLLECTIONS.PRAYERS);
+    const result = await collection.deleteOne({ id: parseInt(prayerId) });
+    return result.deletedCount === 1;
+  } catch (err) {
+    logError("Помилка видалення prayer в MongoDB", err);
+    return false;
   }
 }
 

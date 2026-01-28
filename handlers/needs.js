@@ -1,12 +1,36 @@
 // Обробник заявок на допомогу
 import { Markup } from "telegraf";
-import { readNeeds, readActiveNeeds, readArchivedNeeds, addNeed, findMemberById, findNeedById, updateNeedStatus, updateNeedFields } from "../services/storage.js";
+import { readNeeds, readActiveNeeds, readArchivedNeeds, addNeed, findMemberById, findNeedById, updateNeedStatus, updateNeedFields, deleteNeedById } from "../services/storage.js";
 import { createMainMenu } from "./commands.js";
 import { isAdmin } from "../middlewares/admin.js";
 import { ADMIN_IDS, STATUS_MAP, NEED_STATUS } from "../config/constants.js";
 import { formatNeedMessage, createAdminNotification, createNeed } from "../utils/helpers.js";
-import { validateName, validatePhone, sanitizeText } from "../utils/validation.js";
+import { validateName, validatePhone, validateBirthDate, sanitizeText } from "../utils/validation.js";
 import { generateNeedsExcel, deleteFile } from "../services/excel.js";
+import { generateNeedsPdfBuffer } from "../services/pdf.js";
+
+function buildNeedManageKeyboard(need) {
+  // Вимога:
+  // - після "Відповісти": прибрати "Відповісти", лишити "В процесі" + "Виконано"
+  // - після "В процесі": прибрати "В процесі", але лишити "Відповісти" + "Виконано"
+  const showReply = !need?.repliedAt;
+  const showWaiting = !(need?.waitingAt || need?.inProgressAt);
+  const rows = [];
+
+  if (showReply) {
+    rows.push([Markup.button.callback("💬 Відповісти", `reply_need_${need.id}`)]);
+  }
+
+  const row2 = [Markup.button.callback("✅ Виконано", `need_done_${need.id}`)];
+  if (showWaiting) {
+    row2.push(Markup.button.callback("🕓 В очікуванні", `need_progress_${need.id}`));
+  }
+  rows.push(row2);
+
+  rows.push([Markup.button.callback("🗑️ Видалити", `need_delete_${need.id}`)]);
+
+  return Markup.inlineKeyboard(rows);
+}
 
 /**
  * Створює меню вибору типу допомоги
@@ -18,6 +42,14 @@ export function createNeedTypeMenu() {
   ])
     .resize()
     .persistent();
+}
+
+/**
+ * Меню категорій гуманітарної допомоги
+ */
+export function createHumanitarianCategoryMenu() {
+  // Вимога: тільки 2 кнопки
+  return Markup.keyboard([["Продукти", "Хімія"]]).resize().persistent();
 }
 
 /**
@@ -66,6 +98,12 @@ export async function handleNeedTypeSelection(ctx, msg) {
 
   ctx.session.data.needType = needType;
 
+  // Гуманітарна допомога: обираємо категорію (Продукти/Хімія)
+  if (needType === "humanitarian") {
+    ctx.session.step = "need_humanitarian_category";
+    return ctx.reply("🛒 Оберіть, будь ласка, що саме потрібно:", createHumanitarianCategoryMenu());
+  }
+
   if (member) {
     // Член церкви - тільки опис
     ctx.session.step = "need_description";
@@ -73,10 +111,51 @@ export async function handleNeedTypeSelection(ctx, msg) {
     return ctx.reply("✍️ Опишіть, будь ласка, вашу потребу:", menu);
   } else {
     // Гість - збираємо дані
-    ctx.session.step = "need_guest_name";
+    ctx.session.step = "need_guest_fullname";
     const menu = await createMainMenu(ctx);
-    return ctx.reply("👋 Вкажіть, будь ласка, ваше ім'я та прізвище:", menu);
+    return ctx.reply("👋 Вкажіть, будь ласка, ваше ПІБ (прізвище, імʼя, по батькові):", menu);
   }
+}
+
+/**
+ * Обробник вибору категорії гуманітарної допомоги (через reply keyboard)
+ */
+export async function handleNeedHumanitarianCategorySelection(ctx, msg) {
+  const step = ctx.session?.step;
+  if (step !== "need_humanitarian_category") return false;
+
+  let description = null;
+  if (msg === "Продукти") description = "Продукти";
+  if (msg === "Хімія") description = "Хімія";
+  if (!description) return false;
+
+  ctx.session.data.description = description;
+
+  const member = ctx.session?.data?.user;
+  if (member) {
+    const need = createNeed({
+      userId: ctx.from.id,
+      name: member.name,
+      baptism: member.baptism,
+      birthday: member.birthday,
+      phone: member.phone,
+      description,
+      type: "humanitarian",
+    });
+
+    await addNeed(need);
+    const menu = await createMainMenu(ctx);
+    await ctx.reply("✅ Дякуємо! Заявку збережено 🙏", menu);
+    await notifyAdmins(ctx, need);
+    ctx.session = null;
+    return true;
+  }
+
+  // Гість: збираємо дані
+  ctx.session.step = "need_guest_fullname";
+  const menu = await createMainMenu(ctx);
+  await ctx.reply("👋 Вкажіть, будь ласка, ваше ПІБ (прізвище, імʼя, по батькові):", menu);
+  return true;
 }
 
 /**
@@ -140,27 +219,6 @@ export async function handleAdminNeedsManageList(ctx) {
 
   await ctx.reply(`🆘 Активні заявки на допомогу: ${needs.length}`);
 
-  const buildNeedManageKeyboard = (need) => {
-    // Вимога:
-    // - після "Відповісти": прибрати "Відповісти", лишити "В процесі" + "Виконано"
-    // - після "В процесі": прибрати "В процесі", але лишити "Відповісти" + "Виконано"
-    const showReply = !need?.repliedAt;
-    const showProgress = !need?.inProgressAt;
-    const rows = [];
-
-    if (showReply) {
-      rows.push([Markup.button.callback("💬 Відповісти", `reply_need_${need.id}`)]);
-    }
-
-    const row2 = [Markup.button.callback("✅ Виконано", `need_done_${need.id}`)];
-    if (showProgress) {
-      row2.push(Markup.button.callback("⏳ В процесі", `need_progress_${need.id}`));
-    }
-    rows.push(row2);
-
-    return Markup.inlineKeyboard(rows);
-  };
-
   for (const need of needs) {
     const message = formatNeedMessage(need);
     await ctx.replyWithMarkdown(
@@ -217,11 +275,13 @@ export async function handleAdminNeedMarkProgress(ctx) {
     status: NEED_STATUS.WAITING,
     inProgressAt: now,
     inProgressBy: ctx.from?.id,
+    waitingAt: now,
+    waitingBy: ctx.from?.id,
     lastAction: "in_progress",
     lastActionAt: now,
     lastActionBy: ctx.from?.id,
   });
-  await ctx.answerCbQuery("⏳ Позначено: в процесі");
+  await ctx.answerCbQuery("🕓 Позначено: в очікуванні");
 
   // Повідомляємо користувача
   try {
@@ -239,11 +299,12 @@ export async function handleAdminNeedMarkProgress(ctx) {
   try {
     const msg = formatNeedMessage(updated || need);
     const showReply = !(updated || need)?.repliedAt;
-    await ctx.editMessageText(msg + "\n\n⏳ *В процесі*", {
+    await ctx.editMessageText(msg + "\n\n🕓 *В очікуванні*", {
       parse_mode: "Markdown",
       reply_markup: Markup.inlineKeyboard([
         ...(showReply ? [[Markup.button.callback("💬 Відповісти", `reply_need_${needId}`)]] : []),
         [Markup.button.callback("✅ Виконано", `need_done_${needId}`)],
+        [Markup.button.callback("🗑️ Видалити", `need_delete_${needId}`)],
       ]).reply_markup,
     });
   } catch (err) {
@@ -374,13 +435,25 @@ export async function handleNeedSteps(ctx, msg) {
   }
 
   // === ЗАЯВКА ОТ ГОСТЯ (НЕ ЧЛЕНА ЦЕРКВИ) ===
-  if (step === "need_guest_name") {
+  if (step === "need_guest_fullname" || step === "need_guest_name") {
     const validatedName = validateName(msg);
     if (!validatedName) {
-      ctx.reply("⚠️ Будь ласка, введіть коректне ім'я (2-100 символів, тільки букви).");
+      ctx.reply("⚠️ Будь ласка, введіть коректне ПІБ (2-100 символів, тільки букви).");
       return true;
     }
     ctx.session.data.name = validatedName;
+    ctx.session.step = "need_guest_birthdate";
+    ctx.reply("🎂 Вкажіть вашу дату народження у форматі ДД-ММ-РРРР (наприклад 05-01-1998):");
+    return true;
+  }
+
+  if (step === "need_guest_birthdate") {
+    const validatedBirthDate = validateBirthDate(msg);
+    if (!validatedBirthDate) {
+      ctx.reply("⚠️ Будь ласка, введіть коректну дату у форматі ДД-ММ-РРРР (наприклад 05-01-1998).");
+      return true;
+    }
+    ctx.session.data.birthday = validatedBirthDate;
     ctx.session.step = "need_guest_phone";
     ctx.reply("📞 Вкажіть ваш номер телефону (+380...):");
     return true;
@@ -393,6 +466,29 @@ export async function handleNeedSteps(ctx, msg) {
       return true;
     }
     ctx.session.data.phone = validatedPhone;
+
+    // Якщо це гуманітарна допомога — опис вже обрано (Продукти/Хімія), більше нічого не питаємо
+    if (ctx.session.data.needType === "humanitarian" && ctx.session.data.description) {
+      const userData = ctx.session.data;
+      const need = createNeed({
+        userId: ctx.from.id,
+        name: userData.name,
+        baptism: "Не член церкви",
+        birthday: userData.birthday,
+        phone: userData.phone,
+        description: userData.description,
+        type: "humanitarian",
+      });
+
+      await addNeed(need);
+      const menu = await createMainMenu(ctx);
+      await ctx.reply("✅ Дякуємо! Заявку збережено. Ми з вами зв'яжемось 🙏", menu);
+      await notifyAdmins(ctx, need);
+      ctx.session = null;
+      return true;
+    }
+
+    // Інше — просимо опис
     ctx.session.step = "need_guest_description";
     ctx.reply("✍️ Опишіть вашу потребу:");
     return true;
@@ -409,6 +505,7 @@ export async function handleNeedSteps(ctx, msg) {
       userId: ctx.from.id,
       name: userData.name,
       baptism: "Не член церкви",
+      birthday: userData.birthday,
       phone: userData.phone,
       description: sanitizedDescription,
       type: ctx.session.data.needType || "other",
@@ -436,6 +533,7 @@ export async function handleNeedSteps(ctx, msg) {
       userId: ctx.from.id,
       name: user.name,
       baptism: user.baptism,
+      birthday: user.birthday,
       phone: user.phone,
       description: sanitizedDescription,
       type: ctx.session.data.needType || "other",
@@ -617,7 +715,7 @@ export async function handleNeedReplyText(ctx, msg) {
     });
 
     // Оновлюємо кнопки під повідомленням у списку:
-    // після "Відповісти" прибираємо тільки "💬 Відповісти", лишаємо "⏳ В процесі" + "✅ Виконано"
+    // після "Відповісти" прибираємо тільки "💬 Відповісти", лишаємо "🕓 В очікуванні" + "✅ Виконано"
     try {
       if (messageChatId && messageId) {
         const currentNeed = await findNeedById(needId);
@@ -626,13 +724,24 @@ export async function handleNeedReplyText(ctx, msg) {
           { id: needId, status: "оновлено", name: "-", baptism: "-", phone: "-", description: "-", type: "other", date: "-" };
         const text = formatNeedMessage(safeNeed) + "\n\n✅ *Відповідь надіслана*";
 
-        // Якщо заявка вже "в процесі" — лишаємо тільки "✅ Виконано"
-        const keyboardRows = safeNeed?.inProgressAt
-          ? [[Markup.button.callback("✅ Виконано", `need_done_${needId}`)]]
-          : [[
-              Markup.button.callback("✅ Виконано", `need_done_${needId}`),
-              Markup.button.callback("⏳ В процесі", `need_progress_${needId}`),
-            ]];
+        // Якщо заявка вже "в очікуванні" — кнопку "🕓 В очікуванні" не показуємо.
+        // Після відповіді "💬 Відповісти" вже не показуємо, тож:
+        // - якщо waitingAt/inProgressAt є: показуємо тільки "✅ Виконано"
+        // - якщо нема: "✅ Виконано" + "🕓 В очікуванні"
+        // В обох випадках додаємо "🗑️ Видалити".
+        const alreadyWaiting = !!(safeNeed?.waitingAt || safeNeed?.inProgressAt);
+        const keyboardRows = alreadyWaiting
+          ? [
+              [Markup.button.callback("✅ Виконано", `need_done_${needId}`)],
+              [Markup.button.callback("🗑️ Видалити", `need_delete_${needId}`)],
+            ]
+          : [
+              [
+                Markup.button.callback("✅ Виконано", `need_done_${needId}`),
+                Markup.button.callback("🕓 В очікуванні", `need_progress_${needId}`),
+              ],
+              [Markup.button.callback("🗑️ Видалити", `need_delete_${needId}`)],
+            ];
 
         await ctx.telegram.editMessageText(messageChatId, messageId, undefined, text, {
           parse_mode: "Markdown",
@@ -660,5 +769,221 @@ export async function handleNeedReplyText(ctx, msg) {
   }
 
   return true;
+}
+
+/**
+ * Адмін: видалити заявку назавжди (з Telegram і з MongoDB)
+ */
+export async function handleAdminNeedDelete(ctx) {
+  const needId = parseInt(ctx.match[1]);
+
+  try {
+    await ctx.answerCbQuery("⚠️ Підтвердіть видалення");
+  } catch (err) {
+    // ignore
+  }
+
+  try {
+    await ctx.editMessageReplyMarkup(
+      Markup.inlineKeyboard([
+        [Markup.button.callback("✅ Підтвердити видалення", `need_delete_confirm_${needId}`)],
+        [Markup.button.callback("❌ Скасувати", `need_delete_cancel_${needId}`)],
+      ]).reply_markup
+    );
+  } catch (err) {
+    // ignore
+  }
+}
+
+export async function handleAdminNeedDeleteCancel(ctx) {
+  const needId = parseInt(ctx.match[1]);
+  const need = await findNeedById(needId);
+  if (!need) {
+    try {
+      await ctx.answerCbQuery("⚠️ Уже не існує");
+    } catch (err) {
+      // ignore
+    }
+    try {
+      await ctx.deleteMessage();
+      return;
+    } catch (err) {
+      // ignore
+    }
+    return;
+  }
+
+  try {
+    await ctx.answerCbQuery("✅ Скасовано");
+  } catch (err) {
+    // ignore
+  }
+
+  try {
+    await ctx.editMessageReplyMarkup(buildNeedManageKeyboard(need).reply_markup);
+  } catch (err) {
+    // ignore
+  }
+}
+
+export async function handleAdminNeedDeleteConfirm(ctx) {
+  const needId = parseInt(ctx.match[1]);
+
+  try {
+    await ctx.answerCbQuery("🗑️ Видаляю...");
+  } catch (err) {
+    // ignore
+  }
+
+  const deleted = await deleteNeedById(needId);
+  if (!deleted) {
+    try {
+      await ctx.answerCbQuery("⚠️ Не знайдено (можливо вже видалено)");
+    } catch (err) {
+      // ignore
+    }
+  }
+
+  // Прибираємо повідомлення зі списку, або міняємо текст
+  try {
+    await ctx.deleteMessage();
+    return;
+  } catch (err) {
+    // fallback
+  }
+
+  try {
+    await ctx.editMessageText("🗑️ *Заявку видалено*", { parse_mode: "Markdown" });
+  } catch (err) {
+    // ignore
+  }
+}
+
+// ==================== РОЗДІЛЕННЯ ЗАЯВОК НА 3 СПИСКИ (БОТОМ) ====================
+
+const PRODUCTS_KEYWORDS = [
+  "продукт",
+  "харч",
+  "їж",
+  "круп",
+  "макарон",
+  "консерв",
+  "олія",
+  "масло",
+  "борошн",
+  "цукор",
+];
+const CHEMISTRY_KEYWORDS = [
+  "хім",
+  "хими",
+  "побутова хім",
+  "порош",
+  "миюч",
+  "мило",
+  "шампун",
+  "зубн",
+  "паста",
+  "папір",
+  "серветк",
+];
+
+function normalizeText(s) {
+  return (s || "").toString().toLowerCase().trim();
+}
+
+function classifyNeedCategory(need) {
+  // Явне правило для "Інше"
+  if (need?.type === "other") return "other";
+
+  const desc = normalizeText(need?.description);
+
+  // Гуманітарні: визначаємо по ключових словах
+  if (need?.type === "humanitarian") {
+    if (PRODUCTS_KEYWORDS.some((k) => desc.includes(k))) return "products";
+    if (CHEMISTRY_KEYWORDS.some((k) => desc.includes(k))) return "chemistry";
+    return "other";
+  }
+
+  // fallback (на випадок старих записів без type)
+  if (PRODUCTS_KEYWORDS.some((k) => desc.includes(k))) return "products";
+  if (CHEMISTRY_KEYWORDS.some((k) => desc.includes(k))) return "chemistry";
+  return "other";
+}
+
+function getCategoryLabel(key) {
+  if (key === "products") return "Продукти";
+  if (key === "chemistry") return "Хімія";
+  return "Інше";
+}
+
+export async function handleAdminNeedsCategoryMenu(ctx, categoryKey) {
+  if (!isAdmin(ctx.from?.id)) {
+    const menu = await createMainMenu(ctx);
+    return ctx.reply("⚠️ Ця функція доступна лише для служителів.", menu);
+  }
+
+  const label = getCategoryLabel(categoryKey);
+  return ctx.reply(`📋 Потреби: *${label}*\n\nОберіть дію:`, {
+    parse_mode: "Markdown",
+    reply_markup: Markup.inlineKeyboard([
+      [
+        Markup.button.callback("💬 Показати в чаті", `needs_cat_${categoryKey}_chat`),
+        Markup.button.callback("📄 PDF таблиця", `needs_cat_${categoryKey}_pdf`),
+      ],
+    ]).reply_markup,
+  });
+}
+
+export async function handleAdminNeedsCategoryShowChat(ctx) {
+  const categoryKey = ctx.match[1];
+  const label = getCategoryLabel(categoryKey);
+
+  await ctx.answerCbQuery("Показую...");
+  const needs = await readActiveNeeds();
+  const filtered = needs.filter((n) => classifyNeedCategory(n) === categoryKey);
+
+  if (filtered.length === 0) {
+    return ctx.reply(`📭 Немає активних заявок у категорії: ${label}`);
+  }
+
+  await ctx.reply(`🆘 Активні заявки (${label}): ${filtered.length}`);
+  for (const need of filtered) {
+    await ctx.replyWithMarkdown(formatNeedMessage(need), buildNeedManageKeyboard(need));
+  }
+}
+
+export async function handleAdminNeedsCategoryShowPdf(ctx) {
+  const categoryKey = ctx.match[1];
+  const label = getCategoryLabel(categoryKey);
+
+  await ctx.answerCbQuery("Генерую PDF...");
+  const needs = await readActiveNeeds();
+  const filtered = needs.filter((n) => classifyNeedCategory(n) === categoryKey);
+
+  const rows = filtered.map((n) => {
+    const isDone = n.status === NEED_STATUS.DONE || n.archived === true || !!n.doneAt;
+    const isWaiting = n.status === NEED_STATUS.WAITING || !!n.waitingAt || !!n.inProgressAt;
+    const statusLabel = isDone ? "виконано" : isWaiting ? "в очікуванні" : "—";
+    const statusDate = isDone
+      ? (n.doneAt || "—")
+      : isWaiting
+        ? (n.waitingAt || n.inProgressAt || "—")
+        : "—";
+
+    return {
+      name: n.name,
+      birthday: n.birthday,
+      phone: n.phone,
+      categoryLabel: label,
+      statusLabel,
+      statusDate,
+    };
+  });
+
+  const title = `Таблиця потреб: ${label}`;
+  const buffer = await generateNeedsPdfBuffer({ title, needs: rows });
+  const filename = `needs-${categoryKey}-${new Date().toISOString().slice(0, 10)}.pdf`;
+
+  await ctx.replyWithDocument({ source: buffer, filename });
 }
 

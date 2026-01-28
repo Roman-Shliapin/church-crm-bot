@@ -1,6 +1,6 @@
 // Обробник молитвенних потреб
 import { Markup } from "telegraf";
-import { readPrayers, readActivePrayers, readArchivedPrayers, addPrayer, findMemberById, findPrayerById, updatePrayerClarification, updatePrayerFields } from "../services/storage.js";
+import { readPrayers, readActivePrayers, readArchivedPrayers, addPrayer, findMemberById, findPrayerById, updatePrayerClarification, updatePrayerFields, deletePrayerById } from "../services/storage.js";
 import { getCollection } from "../services/database.js";
 import { createMainMenu } from "./commands.js";
 import { formatPrayerMessage, createPrayer, createAdminPrayerNotification } from "../utils/helpers.js";
@@ -8,6 +8,29 @@ import { ADMIN_IDS } from "../config/constants.js";
 import { sanitizeText } from "../utils/validation.js";
 import { generatePrayersExcel, deleteFile } from "../services/excel.js";
 import { isAdmin } from "../middlewares/admin.js";
+
+function buildPrayerManageKeyboard(prayer) {
+  // Вимога:
+  // - після "Відповісти": прибрати "Відповісти", лишити "В процесі" + "Виконано"
+  // - після "В процесі": прибрати "В процесі", але лишити "Відповісти" + "Виконано"
+  const showReply = !prayer?.repliedAt;
+  const showProgress = !prayer?.inProgressAt;
+  const rows = [];
+
+  if (showReply) {
+    rows.push([Markup.button.callback("💬 Відповісти", `reply_prayer_${prayer.id}`)]);
+  }
+
+  const row2 = [Markup.button.callback("✅ Виконано", `prayer_done_${prayer.id}`)];
+  if (showProgress) {
+    row2.push(Markup.button.callback("⏳ В процесі", `prayer_progress_${prayer.id}`));
+  }
+  rows.push(row2);
+
+  rows.push([Markup.button.callback("🗑️ Видалити", `prayer_delete_${prayer.id}`)]);
+
+  return Markup.inlineKeyboard(rows);
+}
 
 /**
  * Обробник команди /pray - додати молитвенну потребу
@@ -103,27 +126,6 @@ export async function handleAdminPrayersManageList(ctx) {
 
   await ctx.reply(`🙏 Активні молитвені потреби: ${prayers.length}`);
 
-  const buildPrayerManageKeyboard = (prayer) => {
-    // Вимога (аналогічно needs):
-    // - після "Відповісти": прибрати "Відповісти", лишити "В процесі" + "Виконано"
-    // - після "В процесі": прибрати "В процесі", але лишити "Відповісти" + "Виконано"
-    const showReply = !prayer?.repliedAt;
-    const showProgress = !prayer?.inProgressAt;
-    const rows = [];
-
-    if (showReply) {
-      rows.push([Markup.button.callback("💬 Відповісти", `reply_prayer_${prayer.id}`)]);
-    }
-
-    const row2 = [Markup.button.callback("✅ Виконано", `prayer_done_${prayer.id}`)];
-    if (showProgress) {
-      row2.push(Markup.button.callback("⏳ В процесі", `prayer_progress_${prayer.id}`));
-    }
-    rows.push(row2);
-
-    return Markup.inlineKeyboard(rows);
-  };
-
   for (const prayer of prayers) {
     const base = formatPrayerMessage(prayer);
     const statusLine = prayer.status ? `\n⚙️ *Статус:* ${prayer.status}` : "";
@@ -206,6 +208,7 @@ export async function handleAdminPrayerMarkProgress(ctx) {
       reply_markup: Markup.inlineKeyboard([
         ...(showReply ? [[Markup.button.callback("💬 Відповісти", `reply_prayer_${prayerId}`)]] : []),
         [Markup.button.callback("✅ Виконано", `prayer_done_${prayerId}`)],
+        [Markup.button.callback("🗑️ Видалити", `prayer_delete_${prayerId}`)],
       ]).reply_markup,
     });
   } catch (err) {
@@ -734,13 +737,23 @@ export async function handlePrayReplyText(ctx, msg) {
         const base = formatPrayerMessage(current || { name: "Анонімно", description: "-", date: "-" });
         const statusLine = current?.status ? `\n⚙️ *Статус:* ${current.status}` : "";
 
-        // Якщо молитва вже "в процесі" — лишаємо тільки "✅ Виконано"
+        // Якщо молитва вже "в процесі" — прибираємо "⏳ В процесі".
+        // Після відповіді "💬 Відповісти" вже не показуємо, тож:
+        // - якщо inProgressAt є: показуємо тільки "✅ Виконано"
+        // - якщо inProgressAt нема: "✅ Виконано" + "⏳ В процесі"
+        // В обох випадках додаємо "🗑️ Видалити".
         const keyboardRows = current?.inProgressAt
-          ? [[Markup.button.callback("✅ Виконано", `prayer_done_${prayerId}`)]]
-          : [[
-              Markup.button.callback("✅ Виконано", `prayer_done_${prayerId}`),
-              Markup.button.callback("⏳ В процесі", `prayer_progress_${prayerId}`),
-            ]];
+          ? [
+              [Markup.button.callback("✅ Виконано", `prayer_done_${prayerId}`)],
+              [Markup.button.callback("🗑️ Видалити", `prayer_delete_${prayerId}`)],
+            ]
+          : [
+              [
+                Markup.button.callback("✅ Виконано", `prayer_done_${prayerId}`),
+                Markup.button.callback("⏳ В процесі", `prayer_progress_${prayerId}`),
+              ],
+              [Markup.button.callback("🗑️ Видалити", `prayer_delete_${prayerId}`)],
+            ];
 
         await ctx.telegram.editMessageText(
           messageChatId,
@@ -768,5 +781,85 @@ export async function handlePrayReplyText(ctx, msg) {
   }
 
   return true;
+}
+
+/**
+ * Адмін: видалити молитвенну потребу назавжди (з Telegram і з MongoDB)
+ */
+export async function handleAdminPrayerDelete(ctx) {
+  const prayerId = parseInt(ctx.match[1]);
+
+  try {
+    await ctx.answerCbQuery("⚠️ Підтвердіть видалення");
+  } catch (err) {
+    // ignore
+  }
+
+  try {
+    await ctx.editMessageReplyMarkup(
+      Markup.inlineKeyboard([
+        [Markup.button.callback("✅ Підтвердити видалення", `prayer_delete_confirm_${prayerId}`)],
+        [Markup.button.callback("❌ Скасувати", `prayer_delete_cancel_${prayerId}`)],
+      ]).reply_markup
+    );
+  } catch (err) {
+    // ignore
+  }
+}
+
+export async function handleAdminPrayerDeleteCancel(ctx) {
+  const prayerId = parseInt(ctx.match[1]);
+  const prayer = await findPrayerById(prayerId);
+  if (!prayer) {
+    try {
+      await ctx.answerCbQuery("⚠️ Уже не існує");
+    } catch (err) {
+      // ignore
+    }
+    try {
+      await ctx.deleteMessage();
+      return;
+    } catch (err) {
+      // ignore
+    }
+    return;
+  }
+
+  try {
+    await ctx.answerCbQuery("✅ Скасовано");
+  } catch (err) {
+    // ignore
+  }
+
+  try {
+    await ctx.editMessageReplyMarkup(buildPrayerManageKeyboard(prayer).reply_markup);
+  } catch (err) {
+    // ignore
+  }
+}
+
+export async function handleAdminPrayerDeleteConfirm(ctx) {
+  const prayerId = parseInt(ctx.match[1]);
+
+  try {
+    await ctx.answerCbQuery("🗑️ Видаляю...");
+  } catch (err) {
+    // ignore
+  }
+
+  const deleted = await deletePrayerById(prayerId);
+  if (!deleted) {
+    try {
+      await ctx.answerCbQuery("⚠️ Не знайдено (можливо вже видалено)");
+    } catch (err) {
+      // ignore
+    }
+  }
+
+  try {
+    await ctx.editMessageText("🗑️ *Молитвенну потребу видалено*", { parse_mode: "Markdown" });
+  } catch (err) {
+    // ignore
+  }
 }
 

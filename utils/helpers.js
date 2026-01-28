@@ -10,6 +10,7 @@ export function formatNeedMessage(need) {
   return (
     `🙋‍♂️ *${need.name}*\n` +
     `📅 Хрещення: ${need.baptism}\n` +
+    `🎂 День народження: ${need.birthday || "не вказано"}\n` +
     `📞 ${need.phone}\n` +
     `🏷️ Тип: ${typeName}\n` +
     `📖 ${need.description}\n` +
@@ -29,6 +30,7 @@ export function createAdminNotification(need) {
     `📬 *Нова заявка на допомогу!*\n\n` +
     `🙋‍♂️ Ім'я: ${need.name}\n` +
     `📅 Хрещення: ${need.baptism}\n` +
+    `🎂 День народження: ${need.birthday || "не вказано"}\n` +
     `📞 Телефон: ${need.phone}\n` +
     `🏷️ Тип: ${typeName}\n` +
     `📖 Потреба: ${need.description}\n` +
@@ -44,15 +46,17 @@ export function createAdminNotification(need) {
  * @param {string} params.baptism - Дата хрещення
  * @param {string} params.phone - Номер телефону
  * @param {string} params.description - Опис потреби
+ * @param {string} [params.birthday] - День народження (ДД-ММ-РРРР)
  * @param {string} params.type - Тип допомоги (humanitarian/other)
  * @returns {Object} Об'єкт заявки
  */
-export function createNeed({ userId, name, baptism, phone, description, type = "other" }) {
+export function createNeed({ userId, name, baptism, phone, description, birthday, type = "other" }) {
   return {
     id: Date.now(),
     userId,
     name,
     baptism,
+    birthday: birthday || null,
     phone,
     description,
     type,
