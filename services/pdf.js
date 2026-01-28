@@ -88,7 +88,15 @@ export async function generateNeedsPdfBuffer({ title, needs }) {
   return await new Promise((resolve, reject) => {
     try {
       const pdfDoc = pdfMake.createPdf(docDefinition);
-      pdfDoc.getBuffer((buffer) => resolve(buffer));
+      pdfDoc.getBuffer((buffer) => {
+        // pdfmake може повернути Uint8Array — Telegraf очікує Node Buffer
+        try {
+          const out = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
+          resolve(out);
+        } catch (e) {
+          reject(e);
+        }
+      });
     } catch (err) {
       reject(err);
     }

@@ -956,34 +956,48 @@ export async function handleAdminNeedsCategoryShowPdf(ctx) {
   const categoryKey = ctx.match[1];
   const label = getCategoryLabel(categoryKey);
 
-  await ctx.answerCbQuery("Генерую PDF...");
-  const needs = await readActiveNeeds();
-  const filtered = needs.filter((n) => classifyNeedCategory(n) === categoryKey);
+  try {
+    await ctx.answerCbQuery("Генерую PDF...");
+  } catch (err) {
+    // ignore
+  }
 
-  const rows = filtered.map((n) => {
-    const isDone = n.status === NEED_STATUS.DONE || n.archived === true || !!n.doneAt;
-    const isWaiting = n.status === NEED_STATUS.WAITING || !!n.waitingAt || !!n.inProgressAt;
-    const statusLabel = isDone ? "виконано" : isWaiting ? "в очікуванні" : "—";
-    const statusDate = isDone
-      ? (n.doneAt || "—")
-      : isWaiting
-        ? (n.waitingAt || n.inProgressAt || "—")
-        : "—";
+  try {
+    const needs = await readActiveNeeds();
+    const filtered = needs.filter((n) => classifyNeedCategory(n) === categoryKey);
 
-    return {
-      name: n.name,
-      birthday: n.birthday,
-      phone: n.phone,
-      categoryLabel: label,
-      statusLabel,
-      statusDate,
-    };
-  });
+    const rows = filtered.map((n) => {
+      const isDone = n.status === NEED_STATUS.DONE || n.archived === true || !!n.doneAt;
+      const isWaiting = n.status === NEED_STATUS.WAITING || !!n.waitingAt || !!n.inProgressAt;
+      const statusLabel = isDone ? "виконано" : isWaiting ? "в очікуванні" : "—";
+      const statusDate = isDone
+        ? (n.doneAt || "—")
+        : isWaiting
+          ? (n.waitingAt || n.inProgressAt || "—")
+          : "—";
 
-  const title = `Таблиця потреб: ${label}`;
-  const buffer = await generateNeedsPdfBuffer({ title, needs: rows });
-  const filename = `needs-${categoryKey}-${new Date().toISOString().slice(0, 10)}.pdf`;
+      return {
+        name: n.name,
+        birthday: n.birthday,
+        phone: n.phone,
+        categoryLabel: label,
+        statusLabel,
+        statusDate,
+      };
+    });
 
-  await ctx.replyWithDocument({ source: buffer, filename });
+    const title = `Таблиця потреб: ${label}`;
+    const buffer = await generateNeedsPdfBuffer({ title, needs: rows });
+    const filename = `needs-${categoryKey}-${new Date().toISOString().slice(0, 10)}.pdf`;
+
+    if (!buffer || buffer.length === 0) {
+      return ctx.reply("⚠️ Не вдалося згенерувати PDF (порожній файл). Спробуйте ще раз.");
+    }
+
+    await ctx.replyWithDocument({ source: buffer, filename });
+  } catch (err) {
+    console.error("Помилка генерації PDF:", err);
+    await ctx.reply("⚠️ Не вдалося згенерувати PDF. Спробуйте ще раз.");
+  }
 }
 
