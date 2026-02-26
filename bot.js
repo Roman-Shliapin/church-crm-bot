@@ -1,5 +1,5 @@
 // Головний файл бота - точка входу
-import { Telegraf, session } from "telegraf";
+import { Telegraf, session, Markup } from "telegraf";
 import dotenv from "dotenv";
 
 // Завантаження змінних оточення
@@ -12,7 +12,7 @@ import { handleMe, handleMembers, handleMembersShowChat, handleMembersShowExcel,
 import { handleCandidates, handleCandidatesShowChat, handleCandidatesShowExcel } from "./handlers/candidates.js";
 import { handleNeedStart, handleNeedTypeSelection, handleNeedHumanitarianCategorySelection, handleNeedSteps, handleNeedsList, handleNeedsShowChat, handleNeedsShowExcel, handleNeedStatusChange, handleNeedReplyStart, handleNeedReplyText, handleAdminNeedsManageList, handleAdminNeedsArchiveList, handleAdminNeedMarkDone, handleAdminNeedMarkProgress, handleAdminNeedDoneText, handleAdminNeedDelete, handleAdminNeedDeleteConfirm, handleAdminNeedDeleteCancel, handleAdminNeedsCategoryMenu, handleAdminNeedsCategoryShowChat, handleAdminNeedsCategoryShowPdf, handleAdminNeedsArchiveCategoryMenu, handleAdminNeedsArchiveCategoryShowChat, handleAdminNeedsArchiveCategoryShowPdf } from "./handlers/needs.js";
 import { handlePrayStart, handlePraySteps, handlePrayersList, handlePrayersShowChat, handlePrayersShowExcel, handlePrayClarifyStart, handlePrayClarifyText, handlePrayClarifyReplyStart, handlePrayClarifyReplyText, handlePrayReplyStart, handlePrayReplyText, handleAdminPrayersManageList, handleAdminPrayersArchiveList, handleAdminPrayerMarkDone, handleAdminPrayerMarkProgress, handleAdminPrayerDoneText, handleAdminPrayerDelete, handleAdminPrayerDeleteConfirm, handleAdminPrayerDeleteCancel } from "./handlers/prayers.js";
-import { readPrayers, readLiteratureRequests } from "./services/storage.js";
+import { readPrayers, readLiteratureRequests, findMemberById } from "./services/storage.js";
 import { handleLessons, handleLessonSelection, handleLessonCallback } from "./handlers/lessons.js";
 import { handleUploadLessonStart, handleUploadLessonName, handleUploadLessonFile } from "./handlers/lessonsAdmin.js";
 import { handleContact, handleChurchChat, handleBackToMainMenu } from "./handlers/contact.js";
@@ -56,6 +56,40 @@ bot.use(rateLimit(20, 60 * 1000)); // 20 повідомлень на хвили�
 
 // Очищення старих логів при старті
 cleanupOldLogs();
+
+// Middleware: блокування незареєстрованих користувачів
+bot.use(async (ctx, next) => {
+  const userId = ctx.from?.id;
+  if (!userId) return next();
+
+  const msg = ctx.message?.text?.trim();
+
+  if (msg && (msg === "/start" || msg.startsWith("/start ") || msg === "/register")) {
+    return next();
+  }
+
+  if (msg === "📝 Зареєструватися") {
+    return next();
+  }
+
+  if (ctx.session?.step >= 1 && ctx.session?.step <= 5) {
+    return next();
+  }
+
+  if (ctx.callbackQuery?.data?.startsWith("register_")) {
+    return next();
+  }
+
+  const member = await findMemberById(userId);
+  if (!member) {
+    return ctx.reply(
+      "⚠️ Щоб користуватися ботом, спочатку зареєструйтесь, натиснувши кнопку нижче.",
+      Markup.keyboard([["📝 Зареєструватися"]]).resize().persistent()
+    );
+  }
+
+  return next();
+});
 
 // ==================== КОМАНДИ ====================
 // /start - привітання
@@ -107,6 +141,25 @@ bot.command("upload_lesson", checkAdmin, handleUploadLessonStart);
 
 bot.on("text", async (ctx, next) => {
   const msg = ctx.message.text.trim();
+
+  // Обробка кнопок підтвердження відправки (адмін)
+  if (ctx.session?.step?.endsWith("_confirm")) {
+    if (msg === "✅ Відправити") {
+      ctx.session.step = ctx.session.step.replace(/_confirm$/, "");
+      ctx.session.data.confirmed = true;
+    } else if (msg === "✏️ Переписати") {
+      ctx.session.step = ctx.session.step.replace(/_confirm$/, "");
+      delete ctx.session.data.pendingText;
+      delete ctx.session.data.confirmed;
+      return ctx.reply("✍️ Введіть повідомлення повторно:", Markup.removeKeyboard());
+    } else if (msg === "❌ Скасувати") {
+      ctx.session = null;
+      const menu = await createMainMenu(ctx);
+      return ctx.reply("❌ Відправку скасовано.", menu);
+    } else {
+      return ctx.reply("⚠️ Оберіть дію: ✅ Відправити, ✏️ Переписати або ❌ Скасувати.");
+    }
+  }
 
   // Обробка кнопок reply keyboard (повинно бути перед обробкою кроків)
   if (msg === "📝 Зареєструватися") {

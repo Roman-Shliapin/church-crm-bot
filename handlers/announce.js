@@ -2,6 +2,7 @@
 import { Markup } from "telegraf";
 import { readMembers, readBaptizedMembers, readUnbaptizedMembers } from "../services/storage.js";
 import { sanitizeText } from "../utils/validation.js";
+import { createConfirmSendMenu } from "./commands.js";
 
 /**
  * Обробник команди /announce - початок створення оголошення (тільки для адмінів)
@@ -56,12 +57,28 @@ export async function handleAnnounceText(ctx, msg) {
 
   const audienceType = ctx.session.data?.audienceType || "all";
 
-  // Валідація та санітизація тексту оголошення
-  const sanitizedText = sanitizeText(msg, 4000);
+  const textToProcess = ctx.session.data?.confirmed ? ctx.session.data.pendingText : msg;
+  const sanitizedText = sanitizeText(textToProcess, 4000);
   if (!sanitizedText) {
     await ctx.reply("⚠️ Текст оголошення не може бути порожнім або перевищувати 4000 символів.");
     return true;
   }
+
+  if (!ctx.session.data?.confirmed) {
+    const audienceLabels = {
+      baptized: "хрещених членів церкви",
+      unbaptized: "нехрещених (кандидатів)",
+      all: "всіх зареєстрованих",
+    };
+    ctx.session.data.pendingText = sanitizedText;
+    ctx.session.step = "announce_text_confirm";
+    await ctx.reply(
+      `📋 *Перегляд оголошення для ${audienceLabels[audienceType]}:*\n\n${sanitizedText}`,
+      { parse_mode: "Markdown", reply_markup: createConfirmSendMenu().reply_markup }
+    );
+    return true;
+  }
+  delete ctx.session.data.confirmed;
 
   // Отримуємо відповідний список користувачів
   let members = [];

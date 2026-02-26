@@ -1,7 +1,7 @@
 // Обробник заявок на допомогу
 import { Markup } from "telegraf";
 import { readNeeds, readActiveNeeds, readArchivedNeeds, addNeed, addMember, findMemberById, findNeedById, updateNeedStatus, updateNeedFields, deleteNeedById, findLatestHumanitarianNeedByCategory } from "../services/storage.js";
-import { createMainMenu } from "./commands.js";
+import { createMainMenu, createConfirmSendMenu } from "./commands.js";
 import { isAdmin } from "../middlewares/admin.js";
 import { ADMIN_IDS, STATUS_MAP, NEED_STATUS } from "../config/constants.js";
 import { formatNeedMessage, createAdminNotification, createNeed } from "../utils/helpers.js";
@@ -378,11 +378,23 @@ export async function handleAdminNeedDoneText(ctx, msg) {
   if (ctx.session?.step !== "need_done_reply_text") return false;
 
   const { needId, userId, messageChatId, messageId } = ctx.session.data || {};
-  const sanitizedText = sanitizeText(msg, 4000);
+  const textToProcess = ctx.session.data?.confirmed ? ctx.session.data.pendingText : msg;
+  const sanitizedText = sanitizeText(textToProcess, 4000);
   if (!sanitizedText) {
     await ctx.reply("⚠️ Текст не може бути порожнім або перевищувати 4000 символів.");
     return true;
   }
+
+  if (!ctx.session.data?.confirmed) {
+    ctx.session.data.pendingText = sanitizedText;
+    ctx.session.step = "need_done_reply_text_confirm";
+    await ctx.reply(
+      `📋 *Перегляд повідомлення (заявка буде виконана):*\n\n${sanitizedText}`,
+      { parse_mode: "Markdown", reply_markup: createConfirmSendMenu().reply_markup }
+    );
+    return true;
+  }
+  delete ctx.session.data.confirmed;
 
   const need = await findNeedById(needId);
   if (!need) {
@@ -768,12 +780,24 @@ export async function handleNeedReplyText(ctx, msg) {
   }
 
   const { needId, userId, messageChatId, messageId } = ctx.session.data;
-  const sanitizedText = sanitizeText(msg, 4000);
+  const textToProcess = ctx.session.data?.confirmed ? ctx.session.data.pendingText : msg;
+  const sanitizedText = sanitizeText(textToProcess, 4000);
   
   if (!sanitizedText) {
     await ctx.reply("⚠️ Текст не може бути порожнім або перевищувати 4000 символів.");
     return true;
   }
+
+  if (!ctx.session.data?.confirmed) {
+    ctx.session.data.pendingText = sanitizedText;
+    ctx.session.step = "need_reply_text_confirm";
+    await ctx.reply(
+      `📋 *Перегляд відповіді:*\n\n${sanitizedText}`,
+      { parse_mode: "Markdown", reply_markup: createConfirmSendMenu().reply_markup }
+    );
+    return true;
+  }
+  delete ctx.session.data.confirmed;
 
   try {
     const now = new Date().toISOString();

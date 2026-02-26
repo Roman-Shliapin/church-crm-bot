@@ -2,7 +2,7 @@
 import { Markup } from "telegraf";
 import { readPrayers, readActivePrayers, readArchivedPrayers, addPrayer, findMemberById, findPrayerById, updatePrayerClarification, updatePrayerFields, deletePrayerById } from "../services/storage.js";
 import { getCollection } from "../services/database.js";
-import { createMainMenu } from "./commands.js";
+import { createMainMenu, createConfirmSendMenu } from "./commands.js";
 import { formatPrayerMessage, createPrayer, createAdminPrayerNotification } from "../utils/helpers.js";
 import { ADMIN_IDS } from "../config/constants.js";
 import { sanitizeText } from "../utils/validation.js";
@@ -253,11 +253,23 @@ export async function handleAdminPrayerDoneText(ctx, msg) {
   if (ctx.session?.step !== "prayer_done_reply_text") return false;
 
   const { prayerId, userId, messageChatId, messageId } = ctx.session.data || {};
-  const sanitizedText = sanitizeText(msg, 4000);
+  const textToProcess = ctx.session.data?.confirmed ? ctx.session.data.pendingText : msg;
+  const sanitizedText = sanitizeText(textToProcess, 4000);
   if (!sanitizedText) {
     await ctx.reply("⚠️ Текст не може бути порожнім або перевищувати 4000 символів.");
     return true;
   }
+
+  if (!ctx.session.data?.confirmed) {
+    ctx.session.data.pendingText = sanitizedText;
+    ctx.session.step = "prayer_done_reply_text_confirm";
+    await ctx.reply(
+      `📋 *Перегляд повідомлення (потреба буде виконана):*\n\n${sanitizedText}`,
+      { parse_mode: "Markdown", reply_markup: createConfirmSendMenu().reply_markup }
+    );
+    return true;
+  }
+  delete ctx.session.data.confirmed;
 
   const prayer = await findPrayerById(prayerId);
   if (!prayer) {
@@ -494,12 +506,24 @@ export async function handlePrayClarifyText(ctx, msg) {
   }
 
   const { prayerId, userId, adminId } = ctx.session.data;
-  const sanitizedText = sanitizeText(msg, 4000);
+  const textToProcess = ctx.session.data?.confirmed ? ctx.session.data.pendingText : msg;
+  const sanitizedText = sanitizeText(textToProcess, 4000);
   
   if (!sanitizedText) {
     await ctx.reply("⚠️ Текст не може бути порожнім або перевищувати 4000 символів.");
     return true;
   }
+
+  if (!ctx.session.data?.confirmed) {
+    ctx.session.data.pendingText = sanitizedText;
+    ctx.session.step = "pray_clarify_text_confirm";
+    await ctx.reply(
+      `📋 *Перегляд уточнення:*\n\n${sanitizedText}`,
+      { parse_mode: "Markdown", reply_markup: createConfirmSendMenu().reply_markup }
+    );
+    return true;
+  }
+  delete ctx.session.data.confirmed;
 
   try {
     const prayer = await findPrayerById(prayerId);
@@ -509,8 +533,6 @@ export async function handlePrayClarifyText(ctx, msg) {
       return true;
     }
 
-    // Зберігаємо в базі даних, що користувач має відповісти на уточнення
-    // Оновлюємо prayer, додаючи інформацію про уточнення
     await updatePrayerClarification(prayerId, adminId, sanitizedText);
     
     // Відправляємо питання користувачу з reply keyboard для відповіді (без inline кнопок)
@@ -689,12 +711,24 @@ export async function handlePrayReplyText(ctx, msg) {
   }
 
   const { prayerId, userId, messageChatId, messageId } = ctx.session.data;
-  const sanitizedText = sanitizeText(msg, 4000);
+  const textToProcess = ctx.session.data?.confirmed ? ctx.session.data.pendingText : msg;
+  const sanitizedText = sanitizeText(textToProcess, 4000);
   
   if (!sanitizedText) {
     await ctx.reply("⚠️ Текст не може бути порожнім або перевищувати 4000 символів.");
     return true;
   }
+
+  if (!ctx.session.data?.confirmed) {
+    ctx.session.data.pendingText = sanitizedText;
+    ctx.session.step = "pray_reply_text_confirm";
+    await ctx.reply(
+      `📋 *Перегляд остаточної відповіді:*\n\n${sanitizedText}`,
+      { parse_mode: "Markdown", reply_markup: createConfirmSendMenu().reply_markup }
+    );
+    return true;
+  }
+  delete ctx.session.data.confirmed;
 
   try {
     const now = new Date().toISOString();

@@ -2,7 +2,7 @@
 import { Markup } from "telegraf";
 import { addLiteratureRequest, findLiteratureRequestById, findMemberById, readLiteratureRequests } from "../services/storage.js";
 import { getCollection } from "../services/database.js";
-import { createMainMenu } from "./commands.js";
+import { createMainMenu, createConfirmSendMenu } from "./commands.js";
 import { createLiteratureRequest, createAdminLiteratureNotification } from "../utils/helpers.js";
 import { ADMIN_IDS } from "../config/constants.js";
 import { sanitizeText } from "../utils/validation.js";
@@ -194,12 +194,24 @@ export async function handleLiteratureClarifyText(ctx, msg) {
   }
 
   const { requestId, userId, adminId } = ctx.session.data;
-  const sanitizedText = sanitizeText(msg, 4000);
+  const textToProcess = ctx.session.data?.confirmed ? ctx.session.data.pendingText : msg;
+  const sanitizedText = sanitizeText(textToProcess, 4000);
   
   if (!sanitizedText) {
     await ctx.reply("⚠️ Текст не може бути порожнім або перевищувати 4000 символів.");
     return true;
   }
+
+  if (!ctx.session.data?.confirmed) {
+    ctx.session.data.pendingText = sanitizedText;
+    ctx.session.step = "literature_clarify_text_confirm";
+    await ctx.reply(
+      `📋 *Перегляд уточнення:*\n\n${sanitizedText}`,
+      { parse_mode: "Markdown", reply_markup: createConfirmSendMenu().reply_markup }
+    );
+    return true;
+  }
+  delete ctx.session.data.confirmed;
 
   try {
     const request = await findLiteratureRequestById(requestId);
@@ -388,12 +400,24 @@ export async function handleLiteratureReplyText(ctx, msg) {
   }
 
   const { requestId, userId } = ctx.session.data;
-  const sanitizedText = sanitizeText(msg, 4000);
+  const textToProcess = ctx.session.data?.confirmed ? ctx.session.data.pendingText : msg;
+  const sanitizedText = sanitizeText(textToProcess, 4000);
   
   if (!sanitizedText) {
     await ctx.reply("⚠️ Текст не може бути порожнім або перевищувати 4000 символів.");
     return true;
   }
+
+  if (!ctx.session.data?.confirmed) {
+    ctx.session.data.pendingText = sanitizedText;
+    ctx.session.step = "literature_reply_text_confirm";
+    await ctx.reply(
+      `📋 *Перегляд відповіді:*\n\n${sanitizedText}`,
+      { parse_mode: "Markdown", reply_markup: createConfirmSendMenu().reply_markup }
+    );
+    return true;
+  }
+  delete ctx.session.data.confirmed;
 
   try {
     // Відправляємо повідомлення користувачу
