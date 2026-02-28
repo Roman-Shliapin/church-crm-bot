@@ -37,11 +37,25 @@ export async function handleCandidatesShowChat(ctx) {
     return ctx.reply("📭 Наразі немає зареєстрованих нехрещених.");
   }
 
-  let message = "👥 *Список нехрещених:*\n\n";
-  candidates.forEach((c, i) => {
-    message += `${i + 1}. ${c.name}\n📅 Хрещення: ${c.baptism || "Ще не хрещений"}\n🎂 День народження: ${c.birthday || "не вказано"}\n📞 ${c.phone}\n\n`;
-  });
-  await ctx.replyWithMarkdown(message);
+  await ctx.reply(`👥 *Список нехрещених:* ${candidates.length}`, { parse_mode: "Markdown" });
+
+  const slice = candidates.slice(0, 50);
+  for (const c of slice) {
+    try {
+      const text =
+        `👤 *${c.name}*\n` +
+        `📅 Хрещення: ${c.baptism || "Ще не хрещений"}\n` +
+        `🎂 День народження: ${c.birthday || "не вказано"}\n` +
+        `📞 ${c.phone || "не вказано"}`;
+      await ctx.replyWithMarkdown(text);
+    } catch (err) {
+      console.error("Помилка відправки кандидата:", err);
+    }
+  }
+
+  if (candidates.length > slice.length) {
+    await ctx.reply(`ℹ️ Показано ${slice.length} з ${candidates.length}.`);
+  }
 }
 
 /**
@@ -52,7 +66,6 @@ export async function handleCandidatesShowExcel(ctx) {
   const candidates = await readUnbaptizedMembers();
 
   if (candidates.length === 0) {
-    await ctx.answerCbQuery("Немає нехрещених для експорту");
     return ctx.reply("📭 Наразі немає зареєстрованих нехрещених для експорту.");
   }
 

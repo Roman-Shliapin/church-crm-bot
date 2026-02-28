@@ -1,6 +1,6 @@
 // Обробник реєстрації членів церкви
 import { Markup } from "telegraf";
-import { addMember } from "../services/storage.js";
+import { addMember, findMemberById } from "../services/storage.js";
 import { validateName, validatePhone, validateBaptismDate, validateBirthDate } from "../utils/validation.js";
 import { createMainMenu } from "./commands.js";
 
@@ -8,6 +8,12 @@ import { createMainMenu } from "./commands.js";
  * Початок процесу реєстрації
  */
 export async function handleRegisterStart(ctx) {
+  const existingMember = await findMemberById(ctx.from.id);
+  if (existingMember) {
+    const menu = await createMainMenu(ctx);
+    return ctx.reply(`✅ ${existingMember.name}, ви вже зареєстровані!`, menu);
+  }
+
   const menu = await createMainMenu(ctx);
   if (ctx.session?.step) {
     return ctx.reply("Ви вже проходите реєстрацію. Будь ласка, завершіть її.", menu);

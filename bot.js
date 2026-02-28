@@ -80,15 +80,30 @@ bot.use(async (ctx, next) => {
     return next();
   }
 
-  const member = await findMemberById(userId);
-  if (!member) {
-    return ctx.reply(
-      "⚠️ Щоб користуватися ботом, спочатку зареєструйтесь, натиснувши кнопку нижче.",
-      Markup.keyboard([["📝 Зареєструватися"]]).resize().persistent()
-    );
+  try {
+    const member = await findMemberById(userId);
+    if (!member) {
+      return ctx.reply(
+        "⚠️ Щоб користуватися ботом, спочатку зареєструйтесь, натиснувши кнопку нижче.",
+        Markup.keyboard([["📝 Зареєструватися"]]).resize().persistent()
+      );
+    }
+  } catch (err) {
+    console.error("Помилка перевірки реєстрації в middleware:", err);
   }
 
   return next();
+});
+
+// Глобальний обробник помилок Telegraf (запобігає крашу бота)
+bot.catch((err, ctx) => {
+  logError("Необроблена помилка в боті", err);
+  console.error("❌ Bot error:", err);
+  try {
+    ctx.reply("⚠️ Виникла помилка. Спробуйте ще раз.");
+  } catch (e) {
+    // ignore
+  }
 });
 
 // ==================== КОМАНДИ ====================
@@ -547,6 +562,17 @@ setInterval(() => {
     process.exit(1);
   }
 })();
+
+// Захист від крашу через необроблені помилки
+process.on("unhandledRejection", (err) => {
+  logError("Unhandled Promise Rejection", err);
+  console.error("❌ Unhandled Rejection:", err);
+});
+
+process.on("uncaughtException", (err) => {
+  logError("Uncaught Exception", err);
+  console.error("❌ Uncaught Exception:", err);
+});
 
 // Graceful shutdown
 process.once("SIGINT", async () => {

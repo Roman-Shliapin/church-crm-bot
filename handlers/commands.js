@@ -18,8 +18,8 @@ export async function createMainMenu(ctx = null) {
       const member = await findMemberById(ctx.from.id);
       isRegistered = !!member;
     } catch (err) {
-      // Якщо помилка - використовуємо значення за замовчуванням
-      console.error("Помилка перевірки реєстрації:", err);
+      isRegistered = true;
+      console.error("Помилка перевірки реєстрації (показуємо повне меню):", err);
     }
   }
   
