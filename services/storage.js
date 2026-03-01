@@ -171,6 +171,37 @@ export async function addMember(user) {
 }
 
 /**
+ * Оновлює поля члена церкви або кандидата
+ * @param {number} userId - Telegram ID користувача
+ * @param {Object} updates - Об'єкт з полями для оновлення (name, baptism, baptized, birthday, phone)
+ * @returns {Promise<{ok: boolean, reason?: string}>}
+ */
+export async function updateMember(userId, updates) {
+  try {
+    const id = parseInt(userId, 10);
+    if (!id) return { ok: false, reason: "invalid_id" };
+    if (!updates || typeof updates !== "object" || Object.keys(updates).length === 0) {
+      return { ok: true };
+    }
+
+    const membersCollection = await getCollection(COLLECTIONS.MEMBERS);
+    const candidatesCollection = await getCollection(COLLECTIONS.CANDIDATES);
+
+    let member = await membersCollection.findOne({ id });
+    const collection = member ? membersCollection : candidatesCollection;
+    if (!member) member = await candidatesCollection.findOne({ id });
+    if (!member) return { ok: false, reason: "not_found" };
+
+    await collection.updateOne({ id }, { $set: updates });
+    logSuccess("Member updated", { userId: id, fields: Object.keys(updates) });
+    return { ok: true };
+  } catch (err) {
+    logError("Помилка оновлення member/candidate в MongoDB", err);
+    return { ok: false, reason: "error" };
+  }
+}
+
+/**
  * Переміщує користувача з members -> candidates (тільки в цей бік)
  * @param {number} userId - Telegram ID користувача
  * @returns {Promise<{ok: boolean, reason?: string}>}

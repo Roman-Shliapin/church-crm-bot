@@ -7,8 +7,20 @@ dotenv.config();
 
 // Імпорт обробників команд
 import { handleStart, handleHelp, createMainMenu, handleBibleSupport, handleAdminManageNeedsMenu, handleAdminArchiveMenu } from "./handlers/commands.js";
-import { handleRegisterStart, handleRegisterSteps, handleRegisterBaptismStatus } from "./handlers/register.js";
-import { handleMe, handleMembers, handleMembersShowChat, handleMembersShowExcel, handleMemberMoveToCandidatesStart, handleMemberMoveToCandidatesConfirm, handleMemberMoveToCandidatesCancel } from "./handlers/members.js";
+import { handleRegisterStart, handleRegisterSteps, handleRegisterBaptismStatus, handleRegisterContinue, handleRegisterRestart } from "./handlers/register.js";
+import {
+  handleMe,
+  handleMembers,
+  handleMembersShowChat,
+  handleMembersShowExcel,
+  handleMemberMoveToCandidatesStart,
+  handleMemberMoveToCandidatesConfirm,
+  handleMemberMoveToCandidatesCancel,
+  handleProfileEditMenu,
+  handleProfileEditField,
+  handleProfileEditCancel,
+  handleProfileEditText,
+} from "./handlers/members.js";
 import { handleCandidates, handleCandidatesShowChat, handleCandidatesShowExcel } from "./handlers/candidates.js";
 import { handleNeedStart, handleNeedTypeSelection, handleNeedHumanitarianCategorySelection, handleNeedSteps, handleNeedsList, handleNeedsShowChat, handleNeedsShowExcel, handleNeedStatusChange, handleNeedReplyStart, handleNeedReplyText, handleAdminNeedsManageList, handleAdminNeedsArchiveList, handleAdminNeedMarkDone, handleAdminNeedMarkProgress, handleAdminNeedDoneText, handleAdminNeedDelete, handleAdminNeedDeleteConfirm, handleAdminNeedDeleteCancel, handleAdminNeedsCategoryMenu, handleAdminNeedsCategoryShowChat, handleAdminNeedsCategoryShowPdf, handleAdminNeedsArchiveCategoryMenu, handleAdminNeedsArchiveCategoryShowChat, handleAdminNeedsArchiveCategoryShowPdf } from "./handlers/needs.js";
 import { handlePrayStart, handlePraySteps, handlePrayersList, handlePrayersShowChat, handlePrayersShowExcel, handlePrayClarifyStart, handlePrayClarifyText, handlePrayClarifyReplyStart, handlePrayClarifyReplyText, handlePrayReplyStart, handlePrayReplyText, handleAdminPrayersManageList, handleAdminPrayersArchiveList, handleAdminPrayerMarkDone, handleAdminPrayerMarkProgress, handleAdminPrayerDoneText, handleAdminPrayerDelete, handleAdminPrayerDeleteConfirm, handleAdminPrayerDeleteCancel } from "./handlers/prayers.js";
@@ -76,7 +88,11 @@ bot.use(async (ctx, next) => {
     return next();
   }
 
-  if (ctx.callbackQuery?.data?.startsWith("register_")) {
+  if (typeof ctx.session?.step === "string" && ctx.session.step.startsWith("profile_edit_")) {
+    return next();
+  }
+
+  if (ctx.callbackQuery?.data?.startsWith("register_") || ctx.callbackQuery?.data?.startsWith("profile_edit_")) {
     return next();
   }
 
@@ -158,7 +174,7 @@ bot.on("text", async (ctx, next) => {
   const msg = ctx.message.text.trim();
 
   // Обробка кнопок підтвердження відправки (адмін)
-  if (ctx.session?.step?.endsWith("_confirm")) {
+  if (typeof ctx.session?.step === "string" && ctx.session.step.endsWith("_confirm")) {
     if (msg === "✅ Відправити") {
       ctx.session.step = ctx.session.step.replace(/_confirm$/, "");
       ctx.session.data.confirmed = true;
@@ -275,6 +291,11 @@ bot.on("text", async (ctx, next) => {
 
   // Спробуємо обробити кроки реєстрації
   if (await handleRegisterSteps(ctx, msg)) {
+    return;
+  }
+
+  // Спробуємо обробити редагування профілю
+  if (await handleProfileEditText(ctx, msg)) {
     return;
   }
 
@@ -488,6 +509,16 @@ bot.action(/lesson_(\d+)/, handleLessonCallback);
 // Вибір статусу хрещення при реєстрації
 bot.action("register_baptized", (ctx) => handleRegisterBaptismStatus(ctx, true));
 bot.action("register_unbaptized", (ctx) => handleRegisterBaptismStatus(ctx, false));
+bot.action("register_continue", handleRegisterContinue);
+bot.action("register_restart", handleRegisterRestart);
+
+// Редагування профілю
+bot.action("profile_edit_menu", handleProfileEditMenu);
+bot.action("profile_edit_name", (ctx) => handleProfileEditField(ctx, "name"));
+bot.action("profile_edit_baptism", (ctx) => handleProfileEditField(ctx, "baptism"));
+bot.action("profile_edit_birthday", (ctx) => handleProfileEditField(ctx, "birthday"));
+bot.action("profile_edit_phone", (ctx) => handleProfileEditField(ctx, "phone"));
+bot.action("profile_edit_cancel", handleProfileEditCancel);
 
 // Старі inline кнопки для типу допомоги (залишаємо для сумісності, але тепер використовується reply keyboard)
 // bot.action("need_type_humanitarian", (ctx) => handleNeedTypeSelection(ctx, "humanitarian"));

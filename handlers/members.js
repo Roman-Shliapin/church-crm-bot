@@ -1,6 +1,17 @@
-// Обробник команди /members (тільки для адмінів)
+// Обробник команди /members (тільки для адмінів) та редагування профілю
 import { Markup } from "telegraf";
-import { readBaptizedMembers, findMemberById, moveMemberToCandidates } from "../services/storage.js";
+import {
+  readBaptizedMembers,
+  findMemberById,
+  moveMemberToCandidates,
+  updateMember,
+} from "../services/storage.js";
+import {
+  validateName,
+  validatePhone,
+  validateBaptismDate,
+  validateBirthDate,
+} from "../utils/validation.js";
 import { generateMembersExcel, deleteFile } from "../services/excel.js";
 import { createMainMenu } from "./commands.js";
 
@@ -81,7 +92,7 @@ export async function handleMembersShowExcel(ctx) {
 }
 
 /**
- * Обробник команди /me - показує профіль користувача
+ * Обробник команди /me - показує профіль користувача з можливістю редагування
  */
 export async function handleMe(ctx) {
   const member = await findMemberById(ctx.from.id);
@@ -95,9 +106,146 @@ export async function handleMe(ctx) {
       `📛 Ім'я: ${member.name}\n` +
       `📅 Хрещення: ${member.baptism || (member.baptized === false ? "Ще не хрещений" : "не вказано")}\n` +
       `🎂 День народження: ${member.birthday || "не вказано"}\n` +
-      `📞 Телефон: ${member.phone}`;
-    await ctx.replyWithMarkdown(message, menu);
+      `📞 Телефон: ${member.phone || "не вказано"}`;
+    await ctx.replyWithMarkdown(message, Markup.inlineKeyboard([
+      [Markup.button.callback("✏️ Редагувати профіль", "profile_edit_menu")],
+    ]));
+    await ctx.reply("Оберіть кнопки нижче для навігації:", menu);
   }
+}
+
+/**
+ * Показує меню редагування профілю (що змінити)
+ */
+export async function handleProfileEditMenu(ctx) {
+  await ctx.answerCbQuery();
+  const menu = await createMainMenu(ctx);
+  await ctx.reply(
+    "✏️ Що хочете змінити? Оберіть поле:",
+    Markup.inlineKeyboard([
+      [Markup.button.callback("📛 Ім'я", "profile_edit_name")],
+      [Markup.button.callback("📅 Дата хрещення", "profile_edit_baptism")],
+      [Markup.button.callback("🎂 День народження", "profile_edit_birthday")],
+      [Markup.button.callback("📞 Телефон", "profile_edit_phone")],
+      [Markup.button.callback("❌ Відмінити", "profile_edit_cancel")],
+    ])
+  );
+  await ctx.reply("Або використовуйте кнопки меню нижче:", menu);
+}
+
+/**
+ * Callback: почати редагування конкретного поля (встановлює крок, просить ввести)
+ */
+export async function handleProfileEditField(ctx, field) {
+  await ctx.answerCbQuery();
+  ctx.session = { step: `profile_edit_${field}`, data: {} };
+  const prompts = {
+    name: "📛 Введіть нове ім'я та прізвище (2-100 символів, тільки букви, пробіли, дефіси):",
+    baptism:
+      "📅 Введіть дату хрещення (ДД-ММ-РРРР) або напишіть «Ще не хрещений»:",
+    birthday: "🎂 Введіть дату народження (ДД-ММ-РРРР):",
+    phone: "📞 Введіть номер телефону (+380XXXXXXXXX або 0XXXXXXXXX):",
+  };
+  await ctx.reply(prompts[field] || "Введіть нове значення:");
+}
+
+/**
+ * Callback: скасувати редагування профілю
+ */
+export async function handleProfileEditCancel(ctx) {
+  await ctx.answerCbQuery("Скасовано");
+  ctx.session = null;
+  const menu = await createMainMenu(ctx);
+  await ctx.reply("Редагування скасовано.", menu);
+}
+
+/**
+ * Обробляє текст під час редагування профілю
+ * @returns {Promise<boolean>} true якщо оброблено
+ */
+export async function handleProfileEditText(ctx, msg) {
+  const step = ctx.session?.step;
+  if (!step || typeof step !== "string" || !step.startsWith("profile_edit_")) {
+    return false;
+  }
+  const field = step.replace("profile_edit_", "");
+  const menu = await createMainMenu(ctx);
+
+  if (field === "name") {
+    const validated = validateName(msg);
+    if (!validated) {
+      await ctx.reply(
+        "⚠️ Будь ласка, введіть коректне ім'я (2-100 символів, тільки букви, пробіли, дефіси)."
+      );
+      return true;
+    }
+    const result = await updateMember(ctx.from.id, { name: validated });
+    if (!result.ok) {
+      await ctx.reply("⚠️ Не вдалося оновити. Спробуйте ще раз.", menu);
+    } else {
+      await ctx.reply(`✅ Ім'я оновлено: ${validated}`, menu);
+    }
+  } else if (field === "baptism") {
+    const lower = msg.trim().toLowerCase();
+    if (lower === "ще не хрещений" || lower === "ще не хрещена") {
+      const result = await updateMember(ctx.from.id, {
+        baptism: "Ще не хрещений",
+        baptized: false,
+      });
+      if (!result.ok) {
+        await ctx.reply("⚠️ Не вдалося оновити. Спробуйте ще раз.", menu);
+      } else {
+        await ctx.reply("✅ Дата хрещення оновлена: Ще не хрещений", menu);
+      }
+    } else {
+      const validated = validateBaptismDate(msg);
+      if (!validated) {
+        await ctx.reply(
+          "⚠️ Введіть коректну дату (ДД-ММ-РРРР) або «Ще не хрещений»."
+        );
+        return true;
+      }
+      const result = await updateMember(ctx.from.id, {
+        baptism: validated,
+        baptized: true,
+      });
+      if (!result.ok) {
+        await ctx.reply("⚠️ Не вдалося оновити. Спробуйте ще раз.", menu);
+      } else {
+        await ctx.reply(`✅ Дата хрещення оновлена: ${validated}`, menu);
+      }
+    }
+  } else if (field === "birthday") {
+    const validated = validateBirthDate(msg);
+    if (!validated) {
+      await ctx.reply("⚠️ Введіть коректну дату (ДД-ММ-РРРР).");
+      return true;
+    }
+    const result = await updateMember(ctx.from.id, { birthday: validated });
+    if (!result.ok) {
+      await ctx.reply("⚠️ Не вдалося оновити. Спробуйте ще раз.", menu);
+    } else {
+      await ctx.reply(`✅ День народження оновлено: ${validated}`, menu);
+    }
+  } else if (field === "phone") {
+    const validated = validatePhone(msg);
+    if (!validated) {
+      await ctx.reply("⚠️ Введіть коректний номер (+380XXXXXXXXX або 0XXXXXXXXX).");
+      return true;
+    }
+    const result = await updateMember(ctx.from.id, { phone: validated });
+    if (!result.ok) {
+      await ctx.reply("⚠️ Не вдалося оновити. Спробуйте ще раз.", menu);
+    } else {
+      await ctx.reply(`✅ Телефон оновлено: ${validated}`, menu);
+    }
+  } else {
+    ctx.session = null;
+    return true;
+  }
+
+  ctx.session = null;
+  return true;
 }
 
 /**
