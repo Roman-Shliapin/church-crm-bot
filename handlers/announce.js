@@ -2,7 +2,10 @@
 import { Markup } from "telegraf";
 import { readMembers, readBaptizedMembers, readUnbaptizedMembers } from "../services/storage.js";
 import { sanitizeText } from "../utils/validation.js";
-import { createConfirmSendMenu } from "./commands.js";
+import { createConfirmSendMenu, createMainMenu } from "./commands.js";
+
+const failedAnnounceReports = new Map();
+const FAILED_REPORT_TTL_MS = 5 * 60 * 1000;
 
 /**
  * Обробник команди /announce - початок створення оголошення (тільки для адмінів)
@@ -11,7 +14,7 @@ export function handleAnnounceStart(ctx) {
   ctx.session = { step: "announce_audience", data: {} };
   ctx.reply(
     "📢 Створення оголошення\n\n" +
-    "Оберіть цільову аудиторію:",
+    "Крок 1/3: Оберіть цільову аудиторію:",
     Markup.inlineKeyboard([
       [
         Markup.button.callback("✅ Для членів церкви (хрещені)", "announce_baptized"),
@@ -42,7 +45,7 @@ export async function handleAnnounceAudience(ctx, audienceType) {
   ctx.answerCbQuery(`Обрано: ${audienceNames[audienceType]}`);
   ctx.reply(
     `📢 Оголошення для ${audienceNames[audienceType]}\n\n` +
-    "Введіть текст оголошення:"
+    "Крок 2/3: Введіть текст оголошення:"
   );
 }
 
@@ -73,8 +76,14 @@ export async function handleAnnounceText(ctx, msg) {
     ctx.session.data.pendingText = sanitizedText;
     ctx.session.step = "announce_text_confirm";
     await ctx.reply(
-      `📋 *Перегляд оголошення для ${audienceLabels[audienceType]}:*\n\n${sanitizedText}`,
-      { parse_mode: "Markdown", reply_markup: createConfirmSendMenu().reply_markup }
+      `📋 Крок 3/3: Перевірка перед відправкою\n` +
+      `Аудиторія: ${audienceLabels[audienceType]}\n` +
+      `Текст: ${sanitizedText.length} символів\n` +
+      `Фото: не додано\n\n` +
+      `${sanitizedText}\n\n` +
+      "🖼 За потреби надішліть фото одним повідомленням.\n" +
+      "Потім натисніть ✅ Відправити.",
+      { reply_markup: createConfirmSendMenu().reply_markup }
     );
     return true;
   }
@@ -96,35 +105,120 @@ export async function handleAnnounceText(ctx, msg) {
   }
 
   if (members.length === 0) {
-    await ctx.reply(`⚠️ Немає ${audienceName} для розсилки.`);
+    const menu = await createMainMenu(ctx);
+    await ctx.reply(`⚠️ Немає ${audienceName} для розсилки.`, menu);
     ctx.session = null;
     return true;
   }
 
-  const announcement = `📢 *Оголошення*\n\n${sanitizedText}`;
+  const announcement = `📢 Оголошення\n\n${sanitizedText}`;
 
   let sentCount = 0;
   let failedCount = 0;
+  const failedDetails = [];
 
   for (const member of members) {
     try {
-      await ctx.telegram.sendMessage(member.id, announcement, {
-        parse_mode: "Markdown",
-      });
+      if (ctx.session.data?.pendingPhoto) {
+        await ctx.telegram.sendPhoto(member.id, ctx.session.data.pendingPhoto, {
+          caption: announcement,
+        });
+      } else {
+        await ctx.telegram.sendMessage(member.id, announcement);
+      }
       sentCount++;
     } catch (err) {
       console.error(`Помилка надсилання користувачу ${member.id}:`, err);
       failedCount++;
+      failedDetails.push({
+        id: member.id,
+        error: err?.description || err?.message || "unknown_error",
+      });
     }
+  }
+
+  const menu = await createMainMenu(ctx);
+  const replyOptions = failedCount > 0
+    ? Markup.inlineKeyboard([
+        [Markup.button.callback("📄 Завантажити список невдалих", "announce_failed_report")],
+      ])
+    : menu;
+
+  if (failedCount > 0) {
+    failedAnnounceReports.set(ctx.from.id, {
+      createdAt: Date.now(),
+      audienceName,
+      failedDetails,
+    });
+    setTimeout(() => {
+      failedAnnounceReports.delete(ctx.from.id);
+    }, FAILED_REPORT_TTL_MS);
+  } else {
+    failedAnnounceReports.delete(ctx.from.id);
   }
 
   await ctx.reply(
     `✅ Оголошення надіслано ${audienceName}!\n\n` +
     `📊 Статистика:\n` +
     `• Відправлено: ${sentCount}\n` +
-    `• Не вдалося відправити: ${failedCount}`
+    `• Не вдалося відправити: ${failedCount}`,
+    replyOptions
   );
+  await ctx.reply("🏠 Повертаю головне меню.", menu);
 
   ctx.session = null;
+  return true;
+}
+
+export async function handleAnnounceFailedReport(ctx) {
+  await ctx.answerCbQuery();
+  const report = failedAnnounceReports.get(ctx.from.id);
+  const menu = await createMainMenu(ctx);
+
+  if (!report || !Array.isArray(report.failedDetails) || report.failedDetails.length === 0) {
+    return ctx.reply("ℹ️ Немає збереженого списку невдалих відправок.", menu);
+  }
+
+  if (Date.now() - report.createdAt > FAILED_REPORT_TTL_MS) {
+    failedAnnounceReports.delete(ctx.from.id);
+    return ctx.reply("ℹ️ Звіт уже застарів (старше 5 хвилин). Зробіть нову розсилку.", menu);
+  }
+
+  const lines = [
+    `Невдалі відправки оголошення`,
+    `Аудиторія: ${report.audienceName}`,
+    `Час: ${new Date(report.createdAt).toISOString()}`,
+    "",
+    ...report.failedDetails.map((item, idx) => `${idx + 1}. id=${item.id} | ${item.error}`),
+  ];
+  const content = `${lines.join("\n")}\n`;
+
+  await ctx.replyWithDocument({
+    source: Buffer.from(content, "utf8"),
+    filename: `announce-failed-${Date.now()}.txt`,
+  });
+  return ctx.reply("📎 Файл зі списком невдалих відправок надіслано.", menu);
+}
+
+/**
+ * Опціональне фото для оголошення (лише на кроці confirm)
+ */
+export async function handleAnnouncePhoto(ctx) {
+  if (ctx.session?.step !== "announce_text_confirm") {
+    return false;
+  }
+
+  const photos = ctx.message?.photo || [];
+  if (photos.length === 0) {
+    return false;
+  }
+
+  // Беремо найбільший розмір фото
+  const bestPhoto = photos[photos.length - 1];
+  ctx.session.data.pendingPhoto = bestPhoto.file_id;
+
+  await ctx.reply(
+    "✅ Фото додано до оголошення.\nСтатус: Фото додано.\nТепер натисніть ✅ Відправити або ✏️ Переписати."
+  );
   return true;
 }

@@ -28,7 +28,13 @@ import { readPrayers, readLiteratureRequests, findMemberById } from "./services/
 import { handleLessons, handleLessonSelection, handleLessonCallback } from "./handlers/lessons.js";
 import { handleUploadLessonStart, handleUploadLessonName, handleUploadLessonFile } from "./handlers/lessonsAdmin.js";
 import { handleContact, handleChurchChat, handleBackToMainMenu } from "./handlers/contact.js";
-import { handleAnnounceStart, handleAnnounceAudience, handleAnnounceText } from "./handlers/announce.js";
+import {
+  handleAnnounceStart,
+  handleAnnounceAudience,
+  handleAnnounceText,
+  handleAnnouncePhoto,
+  handleAnnounceFailedReport,
+} from "./handlers/announce.js";
 import { handleLiteratureStart, handleLiteratureRequest, handleLiteratureClarifyStart, handleLiteratureClarifyText, handleLiteratureClarifyReplyStart, handleLiteratureClarifyReplyText, handleLiteratureReplyStart, handleLiteratureFinalReplyStart, handleLiteratureReplyText, handleLiteratureReplyDocument } from "./handlers/literature.js";
 
 // Імпорт middleware
@@ -181,6 +187,7 @@ bot.on("text", async (ctx, next) => {
     } else if (msg === "✏️ Переписати") {
       ctx.session.step = ctx.session.step.replace(/_confirm$/, "");
       delete ctx.session.data.pendingText;
+      delete ctx.session.data.pendingPhoto;
       delete ctx.session.data.confirmed;
       return ctx.reply("✍️ Введіть повідомлення повторно:", Markup.removeKeyboard());
     } else if (msg === "❌ Скасувати") {
@@ -425,6 +432,13 @@ bot.on("text", async (ctx, next) => {
   return next();
 });
 
+bot.on("photo", async (ctx, next) => {
+  if (await handleAnnouncePhoto(ctx)) {
+    return;
+  }
+  return next();
+});
+
 // ==================== ОБРОБКА CALLBACK КНОПОК ====================
 
 // Зміна статусу заявки
@@ -528,6 +542,7 @@ bot.action("profile_edit_cancel", handleProfileEditCancel);
 bot.action("announce_baptized", checkAdmin, (ctx) => handleAnnounceAudience(ctx, "baptized"));
 bot.action("announce_unbaptized", checkAdmin, (ctx) => handleAnnounceAudience(ctx, "unbaptized"));
 bot.action("announce_all", checkAdmin, (ctx) => handleAnnounceAudience(ctx, "all"));
+bot.action("announce_failed_report", checkAdmin, handleAnnounceFailedReport);
 
 // ==================== ОБРОБКА ДОКУМЕНТІВ ====================
 
