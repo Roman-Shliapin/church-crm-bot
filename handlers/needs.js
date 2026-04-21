@@ -9,6 +9,9 @@ import { validateName, validatePhone, validateBirthDate, sanitizeText } from "..
 import { generateNeedsExcel, deleteFile } from "../services/excel.js";
 import { generateNeedsPdfBuffer } from "../services/pdf.js";
 
+/** Якщо false — кнопка «Хімія» показує повідомлення про недоступність (змініть на true, коли знову буде допомога). */
+export const HUMANITARIAN_CHEMISTRY_AVAILABLE = false;
+
 function buildNeedManageKeyboard(need) {
   // Вимога:
   // - після "Відповісти": прибрати "Відповісти", лишити "В процесі" + "Виконано"
@@ -127,6 +130,16 @@ export async function handleNeedTypeSelection(ctx, msg) {
 export async function handleNeedHumanitarianCategorySelection(ctx, msg) {
   const step = ctx.session?.step;
   if (step !== "need_humanitarian_category") return false;
+
+  if (msg === "Хімія" && !HUMANITARIAN_CHEMISTRY_AVAILABLE) {
+    await ctx.reply(
+      "🧴 Допомога з хімії наразі недоступна.\n\n" +
+        "Ми повідомимо вас про зміни, щойно з'явиться можливість.\n\n" +
+        "Можете обрати «Продукти» або повернутися в головне меню.",
+      createHumanitarianCategoryMenu()
+    );
+    return true;
+  }
 
   let description = null;
   if (msg === "Продукти") description = "Продукти";
