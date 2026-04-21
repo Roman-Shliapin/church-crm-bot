@@ -51,8 +51,12 @@ export function createNeedTypeMenu() {
  * Меню категорій гуманітарної допомоги
  */
 export function createHumanitarianCategoryMenu() {
-  // Вимога: тільки 2 кнопки
-  return Markup.keyboard([["Продукти", "Хімія"]]).resize().persistent();
+  return Markup.keyboard([
+    ["Продукти", "Хімія"],
+    ["🏠 Повернутися до головного меню"],
+  ])
+    .resize()
+    .persistent();
 }
 
 export function createGuestRegistrationConfirmMenu() {
@@ -135,7 +139,7 @@ export async function handleNeedHumanitarianCategorySelection(ctx, msg) {
     await ctx.reply(
       "🧴 Допомога з хімії наразі недоступна.\n\n" +
         "Ми повідомимо вас про зміни, щойно з'явиться можливість.\n\n" +
-        "Можете обрати «Продукти» або повернутися в головне меню.",
+        "Можете обрати «Продукти» або натисніть кнопку «🏠 Повернутися до головного меню» нижче.",
       createHumanitarianCategoryMenu()
     );
     return true;

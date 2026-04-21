@@ -68,6 +68,7 @@ export async function handleChurchChat(ctx) {
  * Обробник кнопки "Вийти на головне меню"
  */
 export async function handleBackToMainMenu(ctx) {
+  ctx.session = null;
   const menu = await createMainMenu(ctx);
   await ctx.reply("🏠 Повернулися до головного меню", menu);
 }
