@@ -56,3 +56,4 @@ export const STATUS_UPDATE_INTERVAL = 10;
 // Кількість годин до автоматичної зміни статусу з "нове" на "в очікуванні"
 export const AUTO_STATUS_UPDATE_HOURS = 24;
 
+export const NEED_COOLDOWN_AFTER_DONE_DAYS = 10;

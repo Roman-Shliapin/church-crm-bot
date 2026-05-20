@@ -1,9 +1,9 @@
 // Обробник заявок на допомогу
 import { Markup } from "telegraf";
-import { readNeeds, readActiveNeeds, readArchivedNeeds, addNeed, addMember, findMemberById, findNeedById, updateNeedStatus, updateNeedFields, deleteNeedById, findLatestHumanitarianNeedByCategory } from "../services/storage.js";
+import { readNeeds, readActiveNeeds, readArchivedNeeds, addNeed, addMember, findMemberById, findNeedById, updateNeedStatus, updateNeedFields, deleteNeedById, findLatestHumanitarianNeedByCategory, findLatestDoneNeed } from "../services/storage.js";
 import { createMainMenu, createConfirmSendMenu } from "./commands.js";
 import { isAdmin } from "../middlewares/admin.js";
-import { ADMIN_IDS, STATUS_MAP, NEED_STATUS } from "../config/constants.js";
+import { ADMIN_IDS, STATUS_MAP, NEED_STATUS, NEED_COOLDOWN_AFTER_DONE_DAYS } from "../config/constants.js";
 import { formatNeedMessage, createAdminNotification, createNeed } from "../utils/helpers.js";
 import { validateName, validatePhone, validateBirthDate, sanitizeText } from "../utils/validation.js";
 import { generateNeedsExcel, deleteFile } from "../services/excel.js";
@@ -11,6 +11,43 @@ import { generateNeedsPdfBuffer } from "../services/pdf.js";
 
 /** Якщо false — кнопка «Хімія» показує повідомлення про недоступність (змініть на true, коли знову буде допомога). */
 export const HUMANITARIAN_CHEMISTRY_AVAILABLE = false;
+
+/**
+ * Перевіряє, чи минуло достатньо часу після останньої виконаної заявки.
+ * @returns {Promise<{ remainingDays: number }|null>}
+ */
+async function getNeedCooldownAfterDone(userId, categoryKey = null) {
+  const lastDone = await findLatestDoneNeed(userId, categoryKey);
+  if (!lastDone?.doneAt) return null;
+
+  const doneTs = Date.parse(lastDone.doneAt);
+  if (Number.isNaN(doneTs)) return null;
+
+  const cooldownMs = NEED_COOLDOWN_AFTER_DONE_DAYS * 24 * 60 * 60 * 1000;
+  const diff = Date.now() - doneTs;
+  if (diff >= cooldownMs) return null;
+
+  const remainingDays = Math.ceil((cooldownMs - diff) / (24 * 60 * 60 * 1000));
+  return { remainingDays };
+}
+
+async function replyNeedCooldownBlocked(ctx, remainingDays) {
+  const menu = await createMainMenu(ctx);
+  ctx.session = null;
+  await ctx.reply(
+    `⛔ Нещодавно вашу заявку на допомогу було виконано.\n\n` +
+      `Наступну заявку можна подати через *${remainingDays}* дн.`,
+    { parse_mode: "Markdown", reply_markup: menu.reply_markup }
+  );
+}
+
+/** @returns {Promise<boolean>} true — можна подавати заявку */
+async function assertCanSubmitNeed(ctx, categoryKey = null) {
+  const cooldown = await getNeedCooldownAfterDone(ctx.from.id, categoryKey);
+  if (!cooldown) return true;
+  await replyNeedCooldownBlocked(ctx, cooldown.remainingDays);
+  return false;
+}
 
 function buildNeedManageKeyboard(need) {
   // Вимога:
@@ -68,6 +105,13 @@ export function createGuestRegistrationConfirmMenu() {
  */
 export async function handleNeedStart(ctx) {
   const userId = ctx.from.id;
+
+  const cooldown = await getNeedCooldownAfterDone(userId);
+  if (cooldown) {
+    await replyNeedCooldownBlocked(ctx, cooldown.remainingDays);
+    return;
+  }
+
   const member = await findMemberById(userId);
 
   ctx.session = { step: "need_type_selection", data: {} };
@@ -105,6 +149,12 @@ export async function handleNeedTypeSelection(ctx, msg) {
     return ctx.reply("🏠 Повернулися до головного меню", menu);
   } else {
     return false; // Не наш крок
+  }
+
+  const cooldown = await getNeedCooldownAfterDone(ctx.from.id);
+  if (cooldown) {
+    await replyNeedCooldownBlocked(ctx, cooldown.remainingDays);
+    return true;
   }
 
   ctx.session.data.needType = needType;
@@ -150,8 +200,15 @@ export async function handleNeedHumanitarianCategorySelection(ctx, msg) {
   if (msg === "Хімія") description = "Хімія";
   if (!description) return false;
 
-  // 25-денний ліміт: тільки для гуманітарної допомоги і окремо по категоріям "Продукти"/"Хімія"
   const categoryKey = description === "Продукти" ? "products" : "chemistry";
+
+  const cooldownAfterDone = await getNeedCooldownAfterDone(ctx.from.id, categoryKey);
+  if (cooldownAfterDone) {
+    await replyNeedCooldownBlocked(ctx, cooldownAfterDone.remainingDays);
+    return true;
+  }
+
+  // 25-денний ліміт: тільки для гуманітарної допомоги і окремо по категоріям "Продукти"/"Хімія"
   const COOLDOWN_DAYS = 25;
   const COOLDOWN_MS = COOLDOWN_DAYS * 24 * 60 * 60 * 1000;
   const last = await findLatestHumanitarianNeedByCategory(ctx.from.id, categoryKey);
@@ -179,6 +236,8 @@ export async function handleNeedHumanitarianCategorySelection(ctx, msg) {
 
   const member = ctx.session?.data?.user;
   if (member) {
+    if (!(await assertCanSubmitNeed(ctx, categoryKey))) return true;
+
     const need = createNeed({
       userId: ctx.from.id,
       name: member.name,
@@ -423,7 +482,9 @@ export async function handleAdminNeedDoneText(ctx, msg) {
 
   try {
     // 1) Надсилаємо повідомлення користувачу
-    const userMessage = `📬 *Повідомлення щодо вашої заявки на допомогу:*\n\n${sanitizedText}`;
+    const userMessage =
+      `📬 *Повідомлення щодо вашої заявки на допомогу:*\n\n${sanitizedText}\n\n` +
+      `ℹ️ Наступну заявку можна буде подати через *${NEED_COOLDOWN_AFTER_DONE_DAYS}* днів.`;
     await ctx.telegram.sendMessage(userId, userMessage, { parse_mode: "Markdown" });
 
     // 2) Архівуємо в БД (НЕ видаляємо) + фіксуємо дію адміна
@@ -533,6 +594,16 @@ export async function handleNeedSteps(ctx, msg) {
     }
 
     try {
+      const guestCategoryKey =
+        data.needType === "humanitarian" && data.description === "Продукти"
+          ? "products"
+          : data.needType === "humanitarian" && data.description === "Хімія"
+            ? "chemistry"
+            : data.needType === "other"
+              ? "other"
+              : null;
+      if (!(await assertCanSubmitNeed(ctx, guestCategoryKey))) return true;
+
       const need = createNeed({
         userId,
         name: data.name,
@@ -637,6 +708,9 @@ export async function handleNeedSteps(ctx, msg) {
       return true;
     }
     const user = ctx.session.data.user;
+    const memberCategoryKey = ctx.session.data.needType === "other" ? "other" : null;
+    if (!(await assertCanSubmitNeed(ctx, memberCategoryKey))) return true;
+
     const need = createNeed({
       userId: ctx.from.id,
       name: user.name,

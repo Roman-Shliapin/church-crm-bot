@@ -433,6 +433,46 @@ export async function findLatestHumanitarianNeedByCategory(userId, categoryKey) 
 }
 
 /**
+ * Повертає останню виконану (заархівовану) заявку користувача.
+ * @param {number} userId
+ * @param {"products"|"chemistry"|"other"|null} categoryKey — null = будь-яка категорія
+ * @returns {Promise<Object|null>}
+ */
+export async function findLatestDoneNeed(userId, categoryKey = null) {
+  try {
+    const collection = await getCollection(COLLECTIONS.NEEDS);
+    const all = await collection
+      .find({ userId: parseInt(userId), archived: true, doneAt: { $exists: true } })
+      .toArray();
+
+    let needs = all.map(({ _id, ...need }) => need);
+
+    if (categoryKey === "other") {
+      needs = needs.filter((n) => n.type === "other");
+    } else if (categoryKey) {
+      const descNorm = (s) => (s || "").toString().toLowerCase().trim();
+      const isProducts = (n) => {
+        const d = descNorm(n.description);
+        return d === "продукти" || d.includes("продукт") || d.includes("харч") || d.includes("їж");
+      };
+      const isChemistry = (n) => {
+        const d = descNorm(n.description);
+        return d === "хімія" || d.includes("хім") || d.includes("порош") || d.includes("миюч") || d.includes("мило");
+      };
+      needs = needs.filter(categoryKey === "products" ? isProducts : isChemistry);
+    }
+
+    if (needs.length === 0) return null;
+
+    needs.sort((a, b) => Date.parse(b.doneAt || 0) - Date.parse(a.doneAt || 0));
+    return needs[0] || null;
+  } catch (err) {
+    logError("Помилка пошуку latest done need в MongoDB", err);
+    return null;
+  }
+}
+
+/**
  * Оновлює статус заявки
  * @param {number|string} needId - ID заявки
  * @param {string} newStatus - Новий статус
