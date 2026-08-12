@@ -473,6 +473,100 @@ export async function findLatestDoneNeed(userId, categoryKey = null) {
 }
 
 /**
+ * Звіт по гуманітарній допомозі: люди, які отримали допомогу, з кількістю видач.
+ * @param {"products"|"chemistry"|"other"|"all"} categoryKey
+ * @returns {Promise<Array<{name: string, phone: string, birthday: string, baptized: boolean, telegramId: number, count: number, lastDate: string, category: string}>>}
+ */
+export async function getHumanitarianReport(categoryKey) {
+  try {
+    const collection = await getCollection(COLLECTIONS.NEEDS);
+    const all = await collection.find({ archived: true }).toArray();
+    let needs = all.map(({ _id, ...need }) => need);
+
+    const descNorm = (s) => (s || "").toString().toLowerCase().trim();
+    const isProducts = (n) => {
+      const d = descNorm(n.description);
+      return d === "продукти" || d.includes("продукт") || d.includes("харч") || d.includes("їж");
+    };
+    const isChemistry = (n) => {
+      const d = descNorm(n.description);
+      return d === "хімія" || d.includes("хім") || d.includes("порош") || d.includes("миюч") || d.includes("мило");
+    };
+
+    if (categoryKey === "products") {
+      needs = needs.filter(isProducts);
+    } else if (categoryKey === "chemistry") {
+      needs = needs.filter(isChemistry);
+    } else if (categoryKey === "other") {
+      needs = needs.filter((n) => n.type === "other");
+    } else if (categoryKey === "all") {
+      needs = needs.filter((n) => n.type === "humanitarian" || n.type === "other");
+    } else {
+      return [];
+    }
+
+    const categoryLabels = {
+      products: "продукти",
+      chemistry: "хімія",
+      other: "інше",
+      all: "всі",
+    };
+    const categoryLabel = categoryLabels[categoryKey] || categoryKey;
+
+    const formatDoneAt = (iso) => {
+      if (!iso) return "";
+      const ts = Date.parse(iso);
+      if (Number.isNaN(ts)) return String(iso);
+      const d = new Date(ts);
+      const dd = String(d.getDate()).padStart(2, "0");
+      const mm = String(d.getMonth() + 1).padStart(2, "0");
+      const yyyy = d.getFullYear();
+      return `${dd}.${mm}.${yyyy}`;
+    };
+
+    // Групуємо по userId
+    const byUser = new Map();
+    for (const need of needs) {
+      const uid = need.userId;
+      if (uid == null) continue;
+      const existing = byUser.get(uid) || { count: 0, lastDoneAt: null, denormalized: need };
+      existing.count += 1;
+      const doneTs = Date.parse(need.doneAt || 0);
+      const lastTs = Date.parse(existing.lastDoneAt || 0);
+      if (!existing.lastDoneAt || (!Number.isNaN(doneTs) && doneTs >= lastTs)) {
+        existing.lastDoneAt = need.doneAt || existing.lastDoneAt;
+        existing.denormalized = need;
+      }
+      byUser.set(uid, existing);
+    }
+
+    const records = [];
+    for (const [userId, stats] of byUser.entries()) {
+      const person = await findMemberById(userId);
+      const fallback = stats.denormalized || {};
+      records.push({
+        name: person?.name || fallback.name || "",
+        phone: person?.phone || fallback.phone || "",
+        birthday: person?.birthday || fallback.birthday || "",
+        baptized: person
+          ? person.baptized === true || person.baptized === "true"
+          : false,
+        telegramId: userId,
+        count: stats.count,
+        lastDate: formatDoneAt(stats.lastDoneAt),
+        category: categoryLabel,
+      });
+    }
+
+    records.sort((a, b) => (a.name || "").localeCompare(b.name || "", "uk"));
+    return records;
+  } catch (err) {
+    logError("Помилка формування звіту по гуманітарній допомозі в MongoDB", err);
+    return [];
+  }
+}
+
+/**
  * Оновлює статус заявки
  * @param {number|string} needId - ID заявки
  * @param {string} newStatus - Новий статус

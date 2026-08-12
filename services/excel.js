@@ -165,6 +165,48 @@ export async function generatePrayersExcel(prayers) {
 }
 
 /**
+ * Генерує Excel звіт по гуманітарній допомозі
+ * @param {Array} records - Масив записів звіту
+ * @param {string} categoryLabel - Мітка категорії для імені файлу
+ * @returns {string} Шлях до створеного файлу
+ */
+export async function generateHumanitarianReportExcel(records, categoryLabel) {
+  const workbook = new ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet("Звіт по допомозі");
+
+  worksheet.columns = [
+    { header: "№", key: "index", width: 5 },
+    { header: "ПІБ", key: "name", width: 30 },
+    { header: "Телефон", key: "phone", width: 20 },
+    { header: "День народження", key: "birthday", width: 20 },
+    { header: "Хрещений", key: "baptized", width: 12 },
+    { header: "Telegram ID", key: "telegramId", width: 20 },
+    { header: "Разів отримано", key: "count", width: 18 },
+    { header: "Остання видача", key: "lastDate", width: 20 },
+  ];
+
+  records.forEach((record, index) => {
+    worksheet.addRow({
+      index: index + 1,
+      name: record.name || "",
+      phone: record.phone || "",
+      birthday: record.birthday || "",
+      baptized: record.baptized ? "Так" : "Ні",
+      telegramId: record.telegramId,
+      count: record.count,
+      lastDate: record.lastDate || "",
+    });
+  });
+
+  const date = new Date().toISOString().split("T")[0];
+  const safeLabel = (categoryLabel || "all").toString().replace(/\s+/g, "_");
+  const filePath = `humanitarian_report_${safeLabel}_${date}.xlsx`;
+
+  await workbook.xlsx.writeFile(filePath);
+  return filePath;
+}
+
+/**
  * Видаляє файл після надсилання
  * @param {string} filePath - Шлях до файлу
  */

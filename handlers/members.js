@@ -5,6 +5,7 @@ import {
   findMemberById,
   moveMemberToCandidates,
   updateMember,
+  getHumanitarianReport,
 } from "../services/storage.js";
 import {
   validateName,
@@ -12,7 +13,7 @@ import {
   validateBaptismDate,
   validateBirthDate,
 } from "../utils/validation.js";
-import { generateMembersExcel, deleteFile } from "../services/excel.js";
+import { generateMembersExcel, generateHumanitarianReportExcel, deleteFile } from "../services/excel.js";
 import { createMainMenu } from "./commands.js";
 
 /**
@@ -88,6 +89,54 @@ export async function handleMembersShowExcel(ctx) {
   } catch (err) {
     console.error("Помилка генерації Excel:", err);
     await ctx.reply("⚠️ Не вдалося згенерувати Excel файл.");
+  }
+}
+
+/**
+ * Меню вибору категорії для звіту по гуманітарній допомозі
+ */
+export async function handleHumanitarianReportMenu(ctx) {
+  return ctx.reply(
+    "📊 Звіт по гуманітарній допомозі\n\nОберіть тип допомоги:",
+    Markup.inlineKeyboard([
+      [Markup.button.callback("🥫 Продукти", "humanitarian_report_products")],
+      [Markup.button.callback("🧴 Хімія", "humanitarian_report_chemistry")],
+      [Markup.button.callback("💬 Інше", "humanitarian_report_other")],
+      [Markup.button.callback("📋 Всі разом", "humanitarian_report_all")],
+    ])
+  );
+}
+
+/**
+ * Генерує та надсилає Excel звіт по гуманітарній допомозі
+ * @param {Object} ctx
+ * @param {"products"|"chemistry"|"other"|"all"} categoryKey
+ */
+export async function handleHumanitarianReportExcel(ctx, categoryKey) {
+  await ctx.answerCbQuery("Генерую звіт...");
+
+  const categoryLabels = {
+    products: "продукти",
+    chemistry: "хімія",
+    other: "інше",
+    all: "всі",
+  };
+
+  try {
+    const records = await getHumanitarianReport(categoryKey);
+    if (records.length === 0) {
+      return ctx.reply("📭 Немає виконаних заявок у цій категорії.");
+    }
+
+    const filePath = await generateHumanitarianReportExcel(
+      records,
+      categoryLabels[categoryKey]
+    );
+    await ctx.replyWithDocument({ source: filePath });
+    deleteFile(filePath);
+  } catch (err) {
+    console.error("Помилка генерації звіту по допомозі:", err);
+    await ctx.reply("⚠️ Не вдалося згенерувати звіт.");
   }
 }
 

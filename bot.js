@@ -13,6 +13,8 @@ import {
   handleMembers,
   handleMembersShowChat,
   handleMembersShowExcel,
+  handleHumanitarianReportMenu,
+  handleHumanitarianReportExcel,
   handleMemberMoveToCandidatesStart,
   handleMemberMoveToCandidatesConfirm,
   handleMemberMoveToCandidatesCancel,
@@ -221,6 +223,9 @@ bot.on("text", async (ctx, next) => {
   }
   if (msg === "🥫 Продукти") {
     return handleAdminNeedsCategoryMenu(ctx, "products");
+  }
+  if (msg === "📊 Звіт по допомозі") {
+    return handleHumanitarianReportMenu(ctx);
   }
   if (msg === "🧴 Хімія") {
     return handleAdminNeedsCategoryMenu(ctx, "chemistry");
@@ -497,6 +502,12 @@ bot.action("prayers_show_excel", handlePrayersShowExcel);
 // Вибір формату для списку членів
 bot.action("members_show_chat", handleMembersShowChat);
 bot.action("members_show_excel", handleMembersShowExcel);
+
+// Звіт по гуманітарній допомозі (Excel)
+bot.action("humanitarian_report_products", checkAdmin, (ctx) => handleHumanitarianReportExcel(ctx, "products"));
+bot.action("humanitarian_report_chemistry", checkAdmin, (ctx) => handleHumanitarianReportExcel(ctx, "chemistry"));
+bot.action("humanitarian_report_other", checkAdmin, (ctx) => handleHumanitarianReportExcel(ctx, "other"));
+bot.action("humanitarian_report_all", checkAdmin, (ctx) => handleHumanitarianReportExcel(ctx, "all"));
 
 // Переміщення members -> candidates (тільки для адмінів, з підтвердженням)
 bot.action(/member_to_candidate_(\d+)/, checkAdmin, handleMemberMoveToCandidatesStart);
