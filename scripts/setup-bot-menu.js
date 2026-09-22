@@ -34,7 +34,7 @@ async function setupBotMenu() {
     });
 
     console.log("\n⚠️  Примітка:");
-    console.log("Адміністраторські команди (/members, /needs, /prayers, /announce, /upload_lesson)");
+    console.log("Адміністраторські команди (/members, /needs, /announce)");
     console.log("не включені в меню, оскільки вони доступні тільки адміністраторам.");
     console.log("Адміністратори можуть використовувати ці команди напряму, навіть якщо");
     console.log("вони не відображаються в меню.\n");

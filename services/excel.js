@@ -127,42 +127,6 @@ export async function generateNeedsExcel(needs) {
 }
 
 /**
- * Генерує Excel файл зі списком молитвенних потреб
- * @param {Array} prayers - Масив молитвенних потреб
- * @returns {string} Шлях до створеного файлу
- */
-export async function generatePrayersExcel(prayers) {
-  const workbook = new ExcelJS.Workbook();
-  const worksheet = workbook.addWorksheet("Молитвенні потреби");
-
-  // Налаштування колонок
-  worksheet.columns = [
-    { header: "№", key: "index", width: 5 },
-    { header: "Ім'я", key: "name", width: 30 },
-    { header: "Опис", key: "description", width: 60 },
-    { header: "Дата", key: "date", width: 20 },
-    { header: "Telegram ID", key: "userId", width: 20 },
-  ];
-
-  // Додавання даних
-  prayers.forEach((prayer, index) => {
-    worksheet.addRow({
-      index: index + 1,
-      name: prayer.name || "Анонімно",
-      description: prayer.description,
-      date: prayer.date,
-      userId: prayer.userId,
-    });
-  });
-
-  // Генерація імені файлу з поточною датою
-  const date = new Date().toISOString().split("T")[0];
-  const filePath = `prayers_${date}.xlsx`;
-
-  // Збереження файлу
-  await workbook.xlsx.writeFile(filePath);
-  return filePath;
-}
 
 /**
  * Генерує Excel звіт по гуманітарній допомозі

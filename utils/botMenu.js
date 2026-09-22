@@ -8,8 +8,6 @@ export const regularUserCommands = [
   { command: "register", description: "Зареєструватися в системі" },
   { command: "me", description: "Подивитися свої дані" },
   { command: "need", description: "Подати заявку на допомогу" },
-  { command: "pray", description: "Додати молитвенну потребу" },
-  { command: "lessons", description: "Отримати біблійний урок" },
   { command: "contact", description: "Контакти служителів" },
 ];
 
@@ -17,11 +15,8 @@ export const regularUserCommands = [
 export const adminCommands = [
   { command: "members", description: "Список членів церкви" },
   { command: "needs", description: "Усі заявки на допомогу" },
-  { command: "prayers", description: "Список молитвенних потреб" },
   { command: "announce", description: "Зробити оголошення" },
-  { command: "upload_lesson", description: "Завантажити PDF урок" },
 ];
 
 // Всі команди для адмінів
 export const allAdminCommands = [...regularUserCommands, ...adminCommands];
-

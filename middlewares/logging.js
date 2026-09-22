@@ -30,7 +30,7 @@ export function securityLoggingMiddleware(ctx, next) {
   const command = ctx.message?.text || ctx.callbackQuery?.data || "";
 
   // Логуємо спроби доступу до адмінівських команд
-  const adminCommands = ["/members", "/needs", "/prayers", "/announce"];
+  const adminCommands = ["/members", "/needs", "/announce", "/candidates"];
   const isAdminCommand = adminCommands.some((cmd) => command.startsWith(cmd));
 
   if (isAdminCommand && !isAdmin(userId)) {

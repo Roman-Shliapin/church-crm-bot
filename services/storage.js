@@ -7,9 +7,6 @@ const COLLECTIONS = {
   MEMBERS: "members",
   CANDIDATES: "candidates",
   NEEDS: "needs",
-  PRAYERS: "prayers",
-  LESSONS: "lessons",
-  LITERATURE_REQUESTS: "literature_requests",
 };
 
 // ==================== ЧЛЕНИ ЦЕРКВИ ====================
@@ -391,83 +388,24 @@ export async function deleteNeedById(needId) {
 }
 
 /**
- * Повертає останню гуманітарну заявку користувача в конкретній категорії ("products"|"chemistry")
- * Категорія визначається по description (Продукти/Хімія та ключові слова).
+ * Повертає активну (не заархівовану) заявку користувача заданого типу.
  * @param {number} userId
- * @param {"products"|"chemistry"} categoryKey
+ * @param {"humanitarian"|"other"} type
  * @returns {Promise<Object|null>}
  */
-export async function findLatestHumanitarianNeedByCategory(userId, categoryKey) {
+export async function findActiveNeedByType(userId, type) {
   try {
     const collection = await getCollection(COLLECTIONS.NEEDS);
-    const all = await collection
-      .find({ userId: parseInt(userId), type: "humanitarian" })
-      .toArray();
-
-    const needs = all.map(({ _id, ...need }) => need);
-    const descNorm = (s) => (s || "").toString().toLowerCase().trim();
-
-    const isProducts = (n) => {
-      const d = descNorm(n.description);
-      return d === "продукти" || d.includes("продукт") || d.includes("харч") || d.includes("їж");
-    };
-    const isChemistry = (n) => {
-      const d = descNorm(n.description);
-      return d === "хімія" || d.includes("хім") || d.includes("порош") || d.includes("миюч") || d.includes("мило");
-    };
-
-    const filtered =
-      categoryKey === "products"
-        ? needs.filter(isProducts)
-        : needs.filter(isChemistry);
-
-    if (filtered.length === 0) return null;
-
-    // id у нас = Date.now(), тому можна сортувати як timestamp
-    filtered.sort((a, b) => (b.id || 0) - (a.id || 0));
-    return filtered[0] || null;
+    const need = await collection.findOne({
+      userId: parseInt(userId),
+      type,
+      archived: { $ne: true },
+    });
+    if (!need) return null;
+    const { _id, ...rest } = need;
+    return rest;
   } catch (err) {
-    logError("Помилка пошуку latest humanitarian need by category в MongoDB", err);
-    return null;
-  }
-}
-
-/**
- * Повертає останню виконану (заархівовану) заявку користувача.
- * @param {number} userId
- * @param {"products"|"chemistry"|"other"|null} categoryKey — null = будь-яка категорія
- * @returns {Promise<Object|null>}
- */
-export async function findLatestDoneNeed(userId, categoryKey = null) {
-  try {
-    const collection = await getCollection(COLLECTIONS.NEEDS);
-    const all = await collection
-      .find({ userId: parseInt(userId), archived: true, doneAt: { $exists: true } })
-      .toArray();
-
-    let needs = all.map(({ _id, ...need }) => need);
-
-    if (categoryKey === "other") {
-      needs = needs.filter((n) => n.type === "other");
-    } else if (categoryKey) {
-      const descNorm = (s) => (s || "").toString().toLowerCase().trim();
-      const isProducts = (n) => {
-        const d = descNorm(n.description);
-        return d === "продукти" || d.includes("продукт") || d.includes("харч") || d.includes("їж");
-      };
-      const isChemistry = (n) => {
-        const d = descNorm(n.description);
-        return d === "хімія" || d.includes("хім") || d.includes("порош") || d.includes("миюч") || d.includes("мило");
-      };
-      needs = needs.filter(categoryKey === "products" ? isProducts : isChemistry);
-    }
-
-    if (needs.length === 0) return null;
-
-    needs.sort((a, b) => Date.parse(b.doneAt || 0) - Date.parse(a.doneAt || 0));
-    return needs[0] || null;
-  } catch (err) {
-    logError("Помилка пошуку latest done need в MongoDB", err);
+    logError("Помилка пошуку active need by type в MongoDB", err);
     return null;
   }
 }
@@ -612,276 +550,6 @@ export async function updateNeedFields(needId, fields) {
     return needData;
   } catch (err) {
     logError("Помилка оновлення need fields в MongoDB", err);
-    return null;
-  }
-}
-
-// ==================== МОЛИТВЕННІ ПОТРЕБИ ====================
-
-/**
- * Читає всі молитвенні потреби з MongoDB
- * @returns {Promise<Array>} Масив молитвенних потреб
- */
-export async function readPrayers() {
-  try {
-    const collection = await getCollection(COLLECTIONS.PRAYERS);
-    const prayers = await collection.find({}).toArray();
-    return prayers.map(({ _id, ...prayer }) => prayer);
-  } catch (err) {
-    logError("Помилка читання prayers з MongoDB", err);
-    return [];
-  }
-}
-
-/**
- * Читає активні (не заархівовані) молитвені потреби з MongoDB
- * @returns {Promise<Array>}
- */
-export async function readActivePrayers() {
-  try {
-    const collection = await getCollection(COLLECTIONS.PRAYERS);
-    const prayers = await collection.find({ archived: { $ne: true } }).toArray();
-    return prayers.map(({ _id, ...prayer }) => prayer);
-  } catch (err) {
-    logError("Помилка читання active prayers з MongoDB", err);
-    return [];
-  }
-}
-
-/**
- * Читає виконані/заархівовані молитвені потреби з MongoDB
- * @returns {Promise<Array>}
- */
-export async function readArchivedPrayers() {
-  try {
-    const collection = await getCollection(COLLECTIONS.PRAYERS);
-    const prayers = await collection.find({ archived: true }).toArray();
-    return prayers.map(({ _id, ...prayer }) => prayer);
-  } catch (err) {
-    logError("Помилка читання archived prayers з MongoDB", err);
-    return [];
-  }
-}
-
-/**
- * Оновлює довільні поля молитви (НЕ видаляє запис)
- * @param {number|string} prayerId
- * @param {Object} fields
- * @returns {Promise<Object|null>}
- */
-export async function updatePrayerFields(prayerId, fields) {
-  try {
-    const collection = await getCollection(COLLECTIONS.PRAYERS);
-    const result = await collection.findOneAndUpdate(
-      { id: parseInt(prayerId) },
-      { $set: fields },
-      { returnDocument: "after" }
-    );
-    if (!result.value) return null;
-    const { _id, ...prayerData } = result.value;
-    return prayerData;
-  } catch (err) {
-    logError("Помилка оновлення prayer fields в MongoDB", err);
-    return null;
-  }
-}
-
-/**
- * Зберігає масив молитвенних потреб в MongoDB
- * @param {Array} prayers - Масив молитвенних потреб
- */
-export async function writePrayers(prayers) {
-  try {
-    const collection = await getCollection(COLLECTIONS.PRAYERS);
-    await collection.deleteMany({});
-    if (prayers.length > 0) {
-      await collection.insertMany(prayers);
-    }
-  } catch (err) {
-    logError("Помилка запису prayers в MongoDB", err);
-    throw err;
-  }
-}
-
-/**
- * Додає нову молитвенну потребу
- * @param {Object} prayer - Об'єкт молитвенної потреби
- */
-export async function addPrayer(prayer) {
-  try {
-    const collection = await getCollection(COLLECTIONS.PRAYERS);
-    await collection.insertOne(prayer);
-    logSuccess("Prayer added to MongoDB", { prayerId: prayer.id });
-  } catch (err) {
-    logError("Помилка додавання prayer в MongoDB", err);
-    throw err;
-  }
-}
-
-/**
- * Знаходить молитву за ID
- * @param {number} prayerId - ID молитви
- * @returns {Promise<Object|null>} Об'єкт молитви або null
- */
-export async function findPrayerById(prayerId) {
-  try {
-    const collection = await getCollection(COLLECTIONS.PRAYERS);
-    const prayer = await collection.findOne({ id: parseInt(prayerId) });
-    if (!prayer) return null;
-    
-    const { _id, ...prayerData } = prayer;
-    return prayerData;
-  } catch (err) {
-    logError("Помилка пошуку prayer в MongoDB", err);
-    return null;
-  }
-}
-
-/**
- * Видаляє молитвенну потребу з MongoDB назавжди (hard delete)
- * @param {number|string} prayerId
- * @returns {Promise<boolean>} true якщо видалено, інакше false
- */
-export async function deletePrayerById(prayerId) {
-  try {
-    const collection = await getCollection(COLLECTIONS.PRAYERS);
-    const result = await collection.deleteOne({ id: parseInt(prayerId) });
-    return result.deletedCount === 1;
-  } catch (err) {
-    logError("Помилка видалення prayer в MongoDB", err);
-    return false;
-  }
-}
-
-/**
- * Оновлює молитву, додаючи інформацію про уточнення
- * @param {number} prayerId - ID молитви
- * @param {number} adminId - ID адміна, який уточнює
- * @param {string} clarificationText - Текст уточнення
- */
-export async function updatePrayerClarification(prayerId, adminId, clarificationText) {
-  try {
-    const collection = await getCollection(COLLECTIONS.PRAYERS);
-    await collection.findOneAndUpdate(
-      { id: parseInt(prayerId) },
-      { 
-        $set: { 
-          clarifyingAdminId: adminId,
-          clarificationText: clarificationText,
-          needsClarificationReply: true
-        } 
-      }
-    );
-    logSuccess("Prayer clarification updated", { prayerId, adminId });
-  } catch (err) {
-    logError("Помилка оновлення clarification в MongoDB", err);
-    throw err;
-  }
-}
-
-// ==================== БІБЛІЙНІ УРОКИ ====================
-
-/**
- * Читає всі біблійні уроки з MongoDB
- * @returns {Promise<Array>} Масив біблійних уроків
- */
-export async function readLessons() {
-  try {
-    const collection = await getCollection(COLLECTIONS.LESSONS);
-    const lessons = await collection.find({}).toArray();
-    // Сортуємо за ID для коректного відображення
-    lessons.sort((a, b) => a.id - b.id);
-    return lessons.map(({ _id, ...lesson }) => lesson);
-  } catch (err) {
-    logError("Помилка читання lessons з MongoDB", err);
-    return [];
-  }
-}
-
-/**
- * Зберігає масив біблійних уроків в MongoDB
- * @param {Array} lessons - Масив біблійних уроків
- */
-export async function writeLessons(lessons) {
-  try {
-    const collection = await getCollection(COLLECTIONS.LESSONS);
-    await collection.deleteMany({});
-    if (lessons.length > 0) {
-      await collection.insertMany(lessons);
-    }
-    logSuccess("Lessons data saved to MongoDB", { count: lessons.length });
-  } catch (err) {
-    logError("Помилка запису lessons в MongoDB", err);
-    throw err;
-  }
-}
-
-/**
- * Знаходить урок за ID
- * @param {number} lessonId - ID уроку
- * @returns {Promise<Object|null>} Об'єкт уроку або null
- */
-export async function findLessonById(lessonId) {
-  try {
-    const collection = await getCollection(COLLECTIONS.LESSONS);
-    const lesson = await collection.findOne({ id: lessonId });
-    if (!lesson) return null;
-    
-    const { _id, ...lessonData } = lesson;
-    return lessonData;
-  } catch (err) {
-    logError("Помилка пошуку lesson в MongoDB", err);
-    return null;
-  }
-}
-
-// ==================== ЗАПИТИ ЛІТЕРАТУРИ ====================
-
-/**
- * Додає новий запит на літературу
- * @param {Object} request - Об'єкт запиту
- */
-export async function addLiteratureRequest(request) {
-  try {
-    const collection = await getCollection(COLLECTIONS.LITERATURE_REQUESTS);
-    await collection.insertOne(request);
-    logSuccess("Literature request added to MongoDB", { requestId: request.id });
-  } catch (err) {
-    logError("Помилка додавання literature request в MongoDB", err);
-    throw err;
-  }
-}
-
-/**
- * Читає всі запити на літературу з MongoDB
- * @returns {Promise<Array>} Масив запитів
- */
-export async function readLiteratureRequests() {
-  try {
-    const collection = await getCollection(COLLECTIONS.LITERATURE_REQUESTS);
-    const requests = await collection.find({}).toArray();
-    return requests.map(({ _id, ...request }) => request);
-  } catch (err) {
-    logError("Помилка читання literature requests з MongoDB", err);
-    return [];
-  }
-}
-
-/**
- * Знаходить запит на літературу за ID
- * @param {number} requestId - ID запиту
- * @returns {Promise<Object|null>} Об'єкт запиту або null
- */
-export async function findLiteratureRequestById(requestId) {
-  try {
-    const collection = await getCollection(COLLECTIONS.LITERATURE_REQUESTS);
-    const request = await collection.findOne({ id: parseInt(requestId) });
-    if (!request) return null;
-    
-    const { _id, ...requestData } = request;
-    return requestData;
-  } catch (err) {
-    logError("Помилка пошуку literature request в MongoDB", err);
     return null;
   }
 }

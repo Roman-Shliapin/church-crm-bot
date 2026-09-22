@@ -16,8 +16,6 @@ export const helpMessage =
   "/register — зареєструватися в системі\n" +
   "/me — подивитися свої дані\n" +
   "/need — подати заявку на допомогу\n" +
-  "/pray — додати молитвенну потребу\n" +
-  "/lessons — отримати біблійний урок\n" +
   "/contact — контакти служителів";
 
 // Повідомлення допомоги для адміністраторів (з додатковими командами)
@@ -27,15 +25,11 @@ export const helpMessageForAdmins =
   "/members — список членів церкви (хрещені)\n" +
   "/candidates — список нехрещених\n" +
   "/needs — усі заявки на допомогу\n" +
-  "/prayers — список молитвенних потреб\n" +
-  "/announce — зробити оголошення\n" +
-  "/upload_lesson — завантажити PDF урок";
+  "/announce — зробити оголошення";
 
 // Шляхи до файлів даних
 export const MEMBERS_FILE = "members.json";
 export const NEEDS_FILE = "needs.json";
-export const PRAYERS_FILE = "prayers.json";
-export const LESSONS_FILE = "lessons.json";
 
 // Статуси заявок
 export const NEED_STATUS = {
@@ -55,5 +49,3 @@ export const STATUS_UPDATE_INTERVAL = 10;
 
 // Кількість годин до автоматичної зміни статусу з "нове" на "в очікуванні"
 export const AUTO_STATUS_UPDATE_HOURS = 24;
-
-export const NEED_COOLDOWN_AFTER_DONE_DAYS = 10;
