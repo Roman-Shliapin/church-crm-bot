@@ -43,7 +43,7 @@ import { checkAdmin } from "./middlewares/admin.js";
 // Імпорт сервісів
 import { updateNeedStatuses } from "./services/statusUpdater.js";
 import { STATUS_UPDATE_INTERVAL } from "./config/constants.js";
-import { connectToDatabase, closeDatabase } from "./services/database.js";
+import { connectToDatabase, closeDatabase, getCollection } from "./services/database.js";
 
 // Ініціалізація бота
 // ⚠️ ВАЖЛИВО: Створіть .env файл з BOT_TOKEN та ADMIN_IDS для безпеки!
@@ -348,29 +348,45 @@ bot.on("text", async (ctx, next) => {
     "або скористайтеся командою /contacts.";
 
   try {
-    const url = `${process.env.API_URL}/api/free-messages`;
     const payload = {
       botMessage: ctx.session?.lastBotMessage || "(невідомо)",
       userMessage: msg,
     };
+    const apiUrl = process.env.API_URL || "https://church-crm-api-t3ri.onrender.com";
+    const url = `${apiUrl}/api/free-messages`;
     console.log("free-messages POST", {
       url,
       payload,
       hasApiUrl: Boolean(process.env.API_URL),
       hasInternalKey: Boolean(process.env.INTERNAL_API_KEY),
     });
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-internal-key": process.env.INTERNAL_API_KEY,
-      },
-      body: JSON.stringify(payload),
-    });
-    const text = await res.text();
-    console.log("free-messages response", res.status, text);
+
+    let saved = false;
+    if (process.env.INTERNAL_API_KEY) {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-internal-key": process.env.INTERNAL_API_KEY,
+        },
+        body: JSON.stringify(payload),
+      });
+      const text = await res.text();
+      console.log("free-messages response", res.status, text);
+      saved = res.ok;
+    }
+
+    if (!saved) {
+      const col = await getCollection("freemessages");
+      await col.insertOne({
+        ...payload,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      console.log("free-messages saved via mongo");
+    }
   } catch (err) {
-    console.error("free-messages POST failed", err);
+    console.error("free-messages save failed", err);
   }
 
   const sent = await ctx.reply(replyText, {
