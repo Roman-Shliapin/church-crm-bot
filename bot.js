@@ -60,6 +60,32 @@ const bot = new Telegraf(BOT_TOKEN);
 // Використання session middleware для покрокових діалогів
 bot.use(session());
 
+bot.use(async (ctx, next) => {
+  if (!ctx.session) ctx.session = {};
+
+  const saveLastBotMessage = (text) => {
+    if (typeof text === "string" && ctx.session && typeof ctx.session === "object") {
+      ctx.session.lastBotMessage = text;
+    }
+  };
+
+  const originalReply = ctx.reply.bind(ctx);
+  ctx.reply = async (text, ...args) => {
+    const result = await originalReply(text, ...args);
+    saveLastBotMessage(text);
+    return result;
+  };
+
+  const originalReplyWithMarkdown = ctx.replyWithMarkdown.bind(ctx);
+  ctx.replyWithMarkdown = async (text, ...args) => {
+    const result = await originalReplyWithMarkdown(text, ...args);
+    saveLastBotMessage(text);
+    return result;
+  };
+
+  return next();
+});
+
 // Логування middleware
 import { loggingMiddleware, securityLoggingMiddleware } from "./middlewares/logging.js";
 import { logInfo, logError, cleanupOldLogs } from "./utils/logger.js";
@@ -314,12 +340,33 @@ bot.on("text", async (ctx, next) => {
 
   // Вільний текст: бот не пересилає його адміністрації
   const menu = await createMainMenu(ctx);
-  return ctx.reply(
+  const replyText =
     "ℹ️ Це повідомлення *адміністрація не побачить* — бот не пересилає вільний текст служителям.\n\n" +
-      "Щоб зв'язатися з нами, натисніть кнопку *📞 Зв'язатися з нами* у меню\n" +
-      "або скористайтеся командою /contacts.",
-    { parse_mode: "Markdown", reply_markup: menu.reply_markup }
-  );
+    "Щоб зв'язатися з нами, натисніть кнопку *📞 Зв'язатися з нами* у меню\n" +
+    "або скористайтеся командою /contacts.";
+
+  try {
+    await fetch(`${process.env.API_URL}/api/free-messages`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-internal-key": process.env.INTERNAL_API_KEY,
+      },
+      body: JSON.stringify({
+        botMessage: ctx.session?.lastBotMessage || "(невідомо)",
+        userMessage: msg,
+      }),
+    });
+  } catch (err) {
+    // ігноруємо
+  }
+
+  const sent = await ctx.reply(replyText, {
+    parse_mode: "Markdown",
+    reply_markup: menu.reply_markup,
+  });
+  if (ctx.session) ctx.session.lastBotMessage = replyText;
+  return sent;
 });
 
 bot.on("photo", async (ctx, next) => {
