@@ -4,6 +4,26 @@ import { addMember, findMemberById } from "../services/storage.js";
 import { validateName, validatePhone, validateBaptismDate, validateBirthDate } from "../utils/validation.js";
 import { createMainMenu } from "./commands.js";
 
+const REGISTRATION_MAX_STEP = 6;
+
+const stepLabelsShort = {
+  1: "ім'я (наприклад: Тарас)",
+  2: "прізвище (наприклад: Шевченко)",
+  3: "статус хрещення (кнопки нижче)",
+  4: "дату хрещення (ДД-ММ-РРРР)",
+  5: "дату народження (ДД-ММ-РРРР)",
+  6: "номер телефону (+380...)",
+};
+
+const stepLabelsFull = {
+  1: "Введіть, будь ласка, ваше ім'я (наприклад: Тарас).",
+  2: "Введіть, будь ласка, ваше прізвище (наприклад: Шевченко).",
+  3: "Оберіть статус хрещення кнопками нижче.",
+  4: "Вкажіть дату вашого хрещення (у форматі ДД-ММ-РРРР).",
+  5: "Вкажіть дату вашого народження (у форматі ДД-ММ-РРРР).",
+  6: "Вкажіть ваш номер телефону (+380...).",
+};
+
 /**
  * Початок процесу реєстрації
  */
@@ -18,18 +38,10 @@ export async function handleRegisterStart(ctx) {
     console.error("Помилка перевірки реєстрації:", err);
   }
 
-  const isRegistrationStep = ctx.session?.step >= 1 && ctx.session?.step <= 5;
+  const isRegistrationStep = ctx.session?.step >= 1 && ctx.session?.step <= REGISTRATION_MAX_STEP;
   if (isRegistrationStep) {
-    const menu = await createMainMenu(ctx);
-    const stepLabels = {
-      1: "ім'я та прізвище",
-      2: "статус хрещення (кнопки нижче)",
-      3: "дату хрещення (ДД-ММ-РРРР)",
-      4: "дату народження (ДД-ММ-РРРР)",
-      5: "номер телефону (+380...)",
-    };
     const currentStep = ctx.session?.step || 1;
-    const hint = stepLabels[currentStep] || "";
+    const hint = stepLabelsShort[currentStep] || "";
     return ctx.reply(
       `Ви вже проходите реєстрацію (крок ${currentStep}). Що робити?`,
       Markup.inlineKeyboard([
@@ -42,29 +54,19 @@ export async function handleRegisterStart(ctx) {
   ctx.session = { step: 1, data: {} };
   const menu = await createMainMenu(ctx);
   await ctx.reply("🟢 Давай скоріш починати!", menu);
-  await ctx.reply("Введіть, будь ласка, ваше повне ім'я та прізвище:");
+  await ctx.reply("Введіть, будь ласка, ваше ім'я (наприклад: Тарас):");
 }
 
-/**
- * Обробник вибору статусу хрещення
- */
 /**
  * Callback: продовжити реєстрацію (нагадування, що ввести)
  */
 export async function handleRegisterContinue(ctx) {
   await ctx.answerCbQuery("Продовжуйте");
-  const stepLabels = {
-    1: "Введіть, будь ласка, ваше повне ім'я та прізвище.",
-    2: "Оберіть статус хрещення кнопками нижче.",
-    3: "Вкажіть дату вашого хрещення (у форматі ДД-ММ-РРРР).",
-    4: "Вкажіть дату вашого народження (у форматі ДД-ММ-РРРР).",
-    5: "Вкажіть ваш номер телефону (+380...).",
-  };
   const currentStep = ctx.session?.step || 1;
-  const hint = stepLabels[currentStep] || "";
+  const hint = stepLabelsFull[currentStep] || "";
   await ctx.reply(`➡️ ${hint}`);
 
-  if (currentStep === 2 && ctx.session?.data?.name) {
+  if (currentStep === 3 && ctx.session?.data?.firstName && ctx.session?.data?.lastName) {
     await ctx.reply(
       "🔰 Чи ви вже хрещені?",
       Markup.inlineKeyboard([
@@ -85,7 +87,7 @@ export async function handleRegisterRestart(ctx) {
   ctx.session = { step: 1, data: {} };
   const menu = await createMainMenu(ctx);
   await ctx.reply("🔄 Реєстрацію розпочато з початку.", menu);
-  await ctx.reply("Введіть, будь ласка, ваше повне ім'я та прізвище:");
+  await ctx.reply("Введіть, будь ласка, ваше ім'я (наприклад: Тарас):");
 }
 
 export async function handleRegisterBaptismStatus(ctx, isBaptized) {
@@ -98,12 +100,12 @@ export async function handleRegisterBaptismStatus(ctx, isBaptized) {
   ctx.session.data.baptized = isBaptized;
   
   if (isBaptized) {
-    ctx.session.step = 3;
+    ctx.session.step = 4;
     await ctx.answerCbQuery("✅ Обрано: у Христі");
     await ctx.reply("📅 Вкажіть дату вашого хрещення (у форматі ДД-ММ-РРРР):");
   } else {
     ctx.session.data.baptism = "Ще не хрещений";
-    ctx.session.step = 4;
+    ctx.session.step = 5;
     await ctx.answerCbQuery("⏳ Обрано: Ще не хрещений");
     await ctx.reply("🎂 Вкажіть дату вашого народження (у форматі ДД-ММ-РРРР):");
   }
@@ -114,7 +116,7 @@ export async function handleRegisterBaptismStatus(ctx, isBaptized) {
  */
 export async function handleRegisterSteps(ctx, msg) {
   const step = ctx.session?.step;
-  if (!step || (step !== 1 && step !== 2 && step !== 3 && step !== 4 && step !== 5)) {
+  if (!step || step < 1 || step > REGISTRATION_MAX_STEP) {
     return false;
   }
 
@@ -122,18 +124,31 @@ export async function handleRegisterSteps(ctx, msg) {
     ctx.session = { step: 1, data: {} };
     const menu = await createMainMenu(ctx);
     await ctx.reply("⚠️ Сесія була втрачена. Почнімо реєстрацію заново.", menu);
-    await ctx.reply("Введіть, будь ласка, ваше повне ім'я та прізвище:");
+    await ctx.reply("Введіть, будь ласка, ваше ім'я (наприклад: Тарас):");
     return true;
   }
 
   if (step === 1) {
-    const validatedName = validateName(msg);
-    if (!validatedName) {
-      await ctx.reply("⚠️ Будь ласка, введіть коректне ім'я (2-100 символів, тільки букви, пробіли, дефіси).");
+    const validatedFirstName = validateName(msg);
+    if (!validatedFirstName) {
+      await ctx.reply("⚠️ Будь ласка, введіть коректне ім'я (наприклад: Тарас). Тільки букви, 2–100 символів.");
       return true;
     }
-    ctx.session.data.name = validatedName;
+    ctx.session.data.firstName = validatedFirstName;
     ctx.session.step = 2;
+    await ctx.reply("Введіть, будь ласка, ваше прізвище (наприклад: Шевченко):");
+    return true;
+  }
+
+  if (step === 2) {
+    const validatedLastName = validateName(msg);
+    if (!validatedLastName) {
+      await ctx.reply("⚠️ Будь ласка, введіть коректне прізвище (наприклад: Шевченко). Тільки букви, 2–100 символів.");
+      return true;
+    }
+    ctx.session.data.lastName = validatedLastName;
+    ctx.session.data.name = `${ctx.session.data.firstName} ${validatedLastName}`;
+    ctx.session.step = 3;
     await ctx.reply(
       "🔰 Чи ви вже хрещені?",
       Markup.inlineKeyboard([
@@ -146,31 +161,31 @@ export async function handleRegisterSteps(ctx, msg) {
     return true;
   }
 
-  if (step === 3) {
+  if (step === 4) {
     const validatedDate = validateBaptismDate(msg);
     if (!validatedDate) {
       await ctx.reply("⚠️ Будь ласка, введіть коректну дату у форматі ДД-ММ-РРРР (наприклад: 15-03-2020).");
       return true;
     }
     ctx.session.data.baptism = validatedDate;
-    ctx.session.step = 4;
+    ctx.session.step = 5;
     await ctx.reply("🎂 Вкажіть дату вашого народження (у форматі ДД-ММ-РРРР):");
     return true;
   }
 
-  if (step === 4) {
+  if (step === 5) {
     const validatedBirthDate = validateBirthDate(msg);
     if (!validatedBirthDate) {
       await ctx.reply("⚠️ Будь ласка, введіть коректну дату у форматі ДД-ММ-РРРР (наприклад: 15-03-1990).");
       return true;
     }
     ctx.session.data.birthday = validatedBirthDate;
-    ctx.session.step = 5;
+    ctx.session.step = 6;
     await ctx.reply("📞 Вкажіть ваш номер телефону (+380...):");
     return true;
   }
 
-  if (step === 5) {
+  if (step === 6) {
     const validatedPhone = validatePhone(msg);
     if (!validatedPhone) {
       await ctx.reply("⚠️ Будь ласка, введіть коректний номер телефону у форматі +380XXXXXXXXX або 0XXXXXXXXX.");
@@ -206,4 +221,3 @@ export async function handleRegisterSteps(ctx, msg) {
 
   return false;
 }
-

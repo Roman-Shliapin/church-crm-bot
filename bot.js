@@ -88,7 +88,7 @@ bot.use(async (ctx, next) => {
     return next();
   }
 
-  if (ctx.session?.step >= 1 && ctx.session?.step <= 5) {
+  if (ctx.session?.step >= 1 && ctx.session?.step <= 6) {
     return next();
   }
 
@@ -106,6 +106,15 @@ bot.use(async (ctx, next) => {
       return ctx.reply(
         "⚠️ Щоб користуватися ботом, спочатку зареєструйтесь, натиснувши кнопку нижче.",
         Markup.keyboard([["📝 Зареєструватися"]]).resize().persistent()
+      );
+    }
+    if (member.blocked) {
+      // Дозволяємо тільки кнопку "Зв'язатися з нами"
+      if (msg === "📞 Зв'язатися з нами") {
+        return next();
+      }
+      return ctx.reply(
+        "⚠️ Ваш доступ до бота обмежено.\n\nЯкщо у вас є питання, зверніться до служителя протягом 7 днів:\n\n📍 Пирогова 59А\n📅 Середа 13:00 - 14:30\n📅 Неділя о 11:00\n📞 +380 (93) 223 25 26\n👤 Олексій\n\nПісля 7 днів ваш акаунт буде видалено."
       );
     }
   } catch (err) {
@@ -293,8 +302,24 @@ bot.on("text", async (ctx, next) => {
     return;
   }
 
-  // Якщо нічого не підійшло - передаємо далі
-  return next();
+  // Команди (/...) обробляються окремо
+  if (msg.startsWith("/")) {
+    return next();
+  }
+
+  // Якщо користувач у діалозі (сесія) — не підказуємо про «вільне» повідомлення
+  if (ctx.session?.step) {
+    return next();
+  }
+
+  // Вільний текст: бот не пересилає його адміністрації
+  const menu = await createMainMenu(ctx);
+  return ctx.reply(
+    "ℹ️ Це повідомлення *адміністрація не побачить* — бот не пересилає вільний текст служителям.\n\n" +
+      "Щоб зв'язатися з нами, натисніть кнопку *📞 Зв'язатися з нами* у меню\n" +
+      "або скористайтеся командою /contacts.",
+    { parse_mode: "Markdown", reply_markup: menu.reply_markup }
+  );
 });
 
 bot.on("photo", async (ctx, next) => {
