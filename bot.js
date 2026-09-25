@@ -1,9 +1,11 @@
 // Головний файл бота - точка входу
 import { Telegraf, session, Markup } from "telegraf";
 import dotenv from "dotenv";
+import path from "path";
+import { fileURLToPath } from "url";
 
-// Завантаження змінних оточення
-dotenv.config();
+// Завантаження змінних оточення з папки бота, а не з cwd
+dotenv.config({ path: path.join(path.dirname(fileURLToPath(import.meta.url)), ".env") });
 
 // Імпорт обробників команд
 import { handleStart, handleHelp, createMainMenu, handleAdminManageNeedsMenu, handleAdminArchiveMenu } from "./handlers/commands.js";
@@ -346,19 +348,29 @@ bot.on("text", async (ctx, next) => {
     "або скористайтеся командою /contacts.";
 
   try {
-    await fetch(`${process.env.API_URL}/api/free-messages`, {
+    const url = `${process.env.API_URL}/api/free-messages`;
+    const payload = {
+      botMessage: ctx.session?.lastBotMessage || "(невідомо)",
+      userMessage: msg,
+    };
+    console.log("free-messages POST", {
+      url,
+      payload,
+      hasApiUrl: Boolean(process.env.API_URL),
+      hasInternalKey: Boolean(process.env.INTERNAL_API_KEY),
+    });
+    const res = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "x-internal-key": process.env.INTERNAL_API_KEY,
       },
-      body: JSON.stringify({
-        botMessage: ctx.session?.lastBotMessage || "(невідомо)",
-        userMessage: msg,
-      }),
+      body: JSON.stringify(payload),
     });
+    const text = await res.text();
+    console.log("free-messages response", res.status, text);
   } catch (err) {
-    // ігноруємо
+    console.error("free-messages POST failed", err);
   }
 
   const sent = await ctx.reply(replyText, {
