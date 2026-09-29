@@ -348,9 +348,16 @@ bot.on("text", async (ctx, next) => {
     "або скористайтеся командою /contacts.";
 
   try {
+    const telegramId = ctx.from?.id;
+    const member = telegramId ? await findMemberById(telegramId) : null;
+    const telegramName = [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(" ").trim();
     const payload = {
       botMessage: ctx.session?.lastBotMessage || "(невідомо)",
       userMessage: msg,
+      telegramId,
+      name: member?.name || telegramName || "",
+      username: ctx.from?.username || "",
+      phone: member?.phone || "",
     };
     const apiUrl = process.env.API_URL || "https://church-crm-api-t3ri.onrender.com";
     const url = `${apiUrl}/api/free-messages`;
