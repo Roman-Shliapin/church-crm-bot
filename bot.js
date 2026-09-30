@@ -344,8 +344,8 @@ bot.on("text", async (ctx, next) => {
   const menu = await createMainMenu(ctx);
   const replyText =
     "ℹ️ Це повідомлення *адміністрація не побачить* — бот не пересилає вільний текст служителям.\n\n" +
-    "Щоб зв'язатися з нами, натисніть кнопку *📞 Зв'язатися з нами* у меню\n" +
-    "або скористайтеся командою /contacts.";
+    "Ви можете зателефонувати з *10:00* до *20:00*.\n" +
+    "Номер телефону — натисніть кнопку *📞 Зв'язатися з нами*.";
 
   try {
     const telegramId = ctx.from?.id;
@@ -454,8 +454,9 @@ bot.action("candidates_show_chat", handleCandidatesShowChat);
 bot.action("candidates_show_excel", handleCandidatesShowExcel);
 
 // Вибір статусу хрещення при реєстрації
-bot.action("register_baptized", (ctx) => handleRegisterBaptismStatus(ctx, true));
-bot.action("register_unbaptized", (ctx) => handleRegisterBaptismStatus(ctx, false));
+bot.action("register_baptized", (ctx) => handleRegisterBaptismStatus(ctx, true, "conscious"));
+bot.action("register_infant_baptized", (ctx) => handleRegisterBaptismStatus(ctx, false, "infant"));
+bot.action("register_unbaptized", (ctx) => handleRegisterBaptismStatus(ctx, false, "none"));
 bot.action("register_continue", handleRegisterContinue);
 bot.action("register_restart", handleRegisterRestart);
 

@@ -6,10 +6,102 @@ import { createMainMenu } from "./commands.js";
 
 const REGISTRATION_MAX_STEP = 6;
 
+/** Текст для baptism, якщо хрестили в дитинстві (для бота = не усвідомлене хрещення) */
+const BAPTISM_INFANT_LABEL = "Хрещений(а) у дитинстві (не усвідомлено)";
+const BAPTISM_NONE_LABEL = "Ще не хрещений";
+
+const BAPTISM_QUESTION =
+  "🔰 Ви приймали хрещення усвідомлено, за власною вірою, після покаяння та особистого рішення слідувати за Христом?";
+
+function createBaptismStatusKeyboard() {
+  return Markup.inlineKeyboard([
+    [Markup.button.callback("Так, я був(ла) хрещений(а) усвідомлено", "register_baptized")],
+    [Markup.button.callback("Ні, мене хрестили в дитинстві", "register_infant_baptized")],
+    [Markup.button.callback("Ні, я ще не хрестився/хрестилася", "register_unbaptized")],
+  ]);
+}
+
+async function askBaptismQuestion(ctx) {
+  await ctx.reply(BAPTISM_QUESTION, createBaptismStatusKeyboard());
+}
+
+/**
+ * Класифікація текстової відповіді про хрещення.
+ * @returns {"conscious"|"infant"|"none"|null}
+ */
+function classifyBaptismTextAnswer(msg) {
+  const text = (msg || "").toString().toLowerCase().trim();
+  if (!text) return null;
+
+  // Дитяче / неусвідомлене хрещення — першим, щоб «хрестили в 2 роки» не пішло як conscious
+  const infantPatterns = [
+    /младен/,
+    /немовля/,
+    /немовлят/,
+    /дитинств/,
+    /в\s*дитинстві/,
+    /як\s*дитину/,
+    /маленьк/,
+    /хрестил[аии]\s*(мене\s*)?(в\s*)?\d/,
+    /хрестил[аии].*(місяц|рік|роки|років|год)/,
+    /в\s*\d+\s*(місяц|рік|роки|років|год)/,
+    /батьк.*(хрести|крести)/,
+    /крестил[аии]\s*(меня\s*)?(в\s*)?\d/,
+    /крестил.*(месяц|год|лет|детств|младен)/,
+    /в\s*детств/,
+  ];
+  if (infantPatterns.some((re) => re.test(text))) {
+    return "infant";
+  }
+
+  // Ще не хрестився
+  const nonePatterns = [
+    /^ні$/,
+    /^нет$/,
+    /^no$/,
+    /ще\s*не/,
+    /не\s*хрестив/,
+    /не\s*хрестил/,
+    /не\s*крестил/,
+    /не\s*принимал.*крещ/,
+    /не\s*приймав.*хрещ/,
+  ];
+  if (nonePatterns.some((re) => re.test(text))) {
+    return "none";
+  }
+
+  // Усвідомлене хрещення
+  const consciousPatterns = [
+    /^так$/,
+    /^да$/,
+    /^yes$/,
+    /усвідомлен/,
+    /осознанн/,
+    /за\s*власною\s*вірою/,
+    /по\s*вере/,
+    /по\s*вірі/,
+    /я\s*в\s*христ/,
+    /в\s*христ/,
+    /хрещений\s*усвідомлен/,
+    /хрещена\s*усвідомлен/,
+    /^хрещений$/,
+    /^хрещена$/,
+    /^крещён$/,
+    /^крещен$/,
+    /^крещёна$/,
+    /^крещена$/,
+  ];
+  if (consciousPatterns.some((re) => re.test(text))) {
+    return "conscious";
+  }
+
+  return null;
+}
+
 const stepLabelsShort = {
   1: "ім'я (наприклад: Тарас)",
   2: "прізвище (наприклад: Шевченко)",
-  3: "статус хрещення (кнопки нижче)",
+  3: "статус усвідомленого хрещення (кнопки нижче)",
   4: "дату хрещення (ДД-ММ-РРРР)",
   5: "дату народження (ДД-ММ-РРРР)",
   6: "номер телефону (+380...)",
@@ -18,8 +110,8 @@ const stepLabelsShort = {
 const stepLabelsFull = {
   1: "Введіть, будь ласка, ваше ім'я (наприклад: Тарас).",
   2: "Введіть, будь ласка, ваше прізвище (наприклад: Шевченко).",
-  3: "Оберіть статус хрещення кнопками нижче.",
-  4: "Вкажіть дату вашого хрещення (у форматі ДД-ММ-РРРР).",
+  3: "Оберіть варіант щодо усвідомленого хрещення кнопками нижче.",
+  4: "Вкажіть дату вашого усвідомленого хрещення (у форматі ДД-ММ-РРРР).",
   5: "Вкажіть дату вашого народження (у форматі ДД-ММ-РРРР).",
   6: "Вкажіть ваш номер телефону (+380...).",
 };
@@ -67,15 +159,7 @@ export async function handleRegisterContinue(ctx) {
   await ctx.reply(`➡️ ${hint}`);
 
   if (currentStep === 3 && ctx.session?.data?.firstName && ctx.session?.data?.lastName) {
-    await ctx.reply(
-      "🔰 Чи ви вже хрещені?",
-      Markup.inlineKeyboard([
-        [
-          Markup.button.callback("✅ Так, я в Христі", "register_baptized"),
-          Markup.button.callback("⏳ Ще не хрещений", "register_unbaptized"),
-        ],
-      ])
-    );
+    await askBaptismQuestion(ctx);
   }
 }
 
@@ -90,25 +174,38 @@ export async function handleRegisterRestart(ctx) {
   await ctx.reply("Введіть, будь ласка, ваше ім'я (наприклад: Тарас):");
 }
 
-export async function handleRegisterBaptismStatus(ctx, isBaptized) {
+/**
+ * @param {boolean} isBaptized - true лише для усвідомленого хрещення
+ * @param {"conscious"|"infant"|"none"} [kind] - уточнення гілки
+ */
+export async function handleRegisterBaptismStatus(ctx, isBaptized, kind = null) {
   if (!ctx.session?.data) {
     await ctx.answerCbQuery("⚠️ Сесія закінчилася. Почніть реєстрацію знову.");
     const menu = await createMainMenu(ctx);
     return ctx.reply("⚠️ Сесія закінчилася. Натисніть 📝 Зареєструватися, щоб почати знову.", menu);
   }
 
-  ctx.session.data.baptized = isBaptized;
-  
-  if (isBaptized) {
+  const choice = kind || (isBaptized ? "conscious" : "none");
+
+  if (choice === "conscious" || isBaptized === true) {
+    ctx.session.data.baptized = true;
     ctx.session.step = 4;
-    await ctx.answerCbQuery("✅ Обрано: у Христі");
-    await ctx.reply("📅 Вкажіть дату вашого хрещення (у форматі ДД-ММ-РРРР):");
-  } else {
-    ctx.session.data.baptism = "Ще не хрещений";
-    ctx.session.step = 5;
-    await ctx.answerCbQuery("⏳ Обрано: Ще не хрещений");
-    await ctx.reply("🎂 Вкажіть дату вашого народження (у форматі ДД-ММ-РРРР):");
+    await ctx.answerCbQuery("✅ Обрано: усвідомлене хрещення");
+    await ctx.reply("📅 Вкажіть дату вашого усвідомленого хрещення (у форматі ДД-ММ-РРРР):");
+    return;
   }
+
+  // infant і none → для логіки бота НЕ хрещений (candidates)
+  ctx.session.data.baptized = false;
+  if (choice === "infant") {
+    ctx.session.data.baptism = BAPTISM_INFANT_LABEL;
+    await ctx.answerCbQuery("Обрано: хрещення в дитинстві");
+  } else {
+    ctx.session.data.baptism = BAPTISM_NONE_LABEL;
+    await ctx.answerCbQuery("⏳ Обрано: ще не хрещений(а)");
+  }
+  ctx.session.step = 5;
+  await ctx.reply("🎂 Вкажіть дату вашого народження (у форматі ДД-ММ-РРРР):");
 }
 
 /**
@@ -149,15 +246,31 @@ export async function handleRegisterSteps(ctx, msg) {
     ctx.session.data.lastName = validatedLastName;
     ctx.session.data.name = `${ctx.session.data.firstName} ${validatedLastName}`;
     ctx.session.step = 3;
-    await ctx.reply(
-      "🔰 Чи ви вже хрещені?",
-      Markup.inlineKeyboard([
-        [
-          Markup.button.callback("✅ Так, я в Христі", "register_baptized"),
-          Markup.button.callback("⏳ Ще не хрещений", "register_unbaptized"),
-        ],
-      ])
-    );
+    await askBaptismQuestion(ctx);
+    return true;
+  }
+
+  if (step === 3) {
+    const choice = classifyBaptismTextAnswer(msg);
+    if (!choice) {
+      await ctx.reply(
+        "⚠️ Будь ласка, оберіть один із варіантів кнопками нижче — так відповідь буде однозначною.",
+        createBaptismStatusKeyboard()
+      );
+      return true;
+    }
+
+    if (choice === "conscious") {
+      ctx.session.data.baptized = true;
+      ctx.session.step = 4;
+      await ctx.reply("📅 Вкажіть дату вашого усвідомленого хрещення (у форматі ДД-ММ-РРРР):");
+      return true;
+    }
+
+    ctx.session.data.baptized = false;
+    ctx.session.data.baptism = choice === "infant" ? BAPTISM_INFANT_LABEL : BAPTISM_NONE_LABEL;
+    ctx.session.step = 5;
+    await ctx.reply("🎂 Вкажіть дату вашого народження (у форматі ДД-ММ-РРРР):");
     return true;
   }
 
@@ -193,12 +306,12 @@ export async function handleRegisterSteps(ctx, msg) {
     }
 
     const baptized = Boolean(ctx.session.data.baptized === true);
-    
+
     const user = {
       id: ctx.from.id,
       name: ctx.session.data.name,
       baptized: baptized,
-      baptism: ctx.session.data.baptism || "Ще не хрещений",
+      baptism: ctx.session.data.baptism || BAPTISM_NONE_LABEL,
       birthday: ctx.session.data.birthday,
       phone: validatedPhone,
     };
@@ -206,7 +319,7 @@ export async function handleRegisterSteps(ctx, msg) {
     try {
       await addMember(user);
       const menu = await createMainMenu(ctx);
-      const successMessage = user.baptized 
+      const successMessage = user.baptized
         ? `✅ Дякуємо, ${user.name}! Ви успішно зареєстровані як член церкви.`
         : `✅ Дякуємо, ${user.name}! Ви успішно зареєстровані. Ми молимося за вас! 🙏`;
       await ctx.reply(successMessage, menu);
